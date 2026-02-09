@@ -284,7 +284,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
         return
 
 # ------------------------------------------------------------
-# Input-Output Helpers
+# INPUT-OUTPUT HELPERS
 # ------------------------------------------------------------
 
 def load_csv_file(csv_path: str, table_name: str, 
