@@ -1,10 +1,9 @@
 # =============================================================================
-# Derive Seller Fulfillment Fact Tables
+# BUILD BI-TOOL SEMANTIC LAYER
 # =============================================================================
-# - Transform assembled event data into seller-level fact tables
-# - Define and lock the analytical grain for downstream reporting
-# - Compute repeatable, time-aware fulfillment metrics
-# - Output fact tables safe for direct BI consumption
+# - Produce contract-compliant facts and dimensions safe for direct BI consumption
+# - Define and lock analytical grains for consistent aggregation and reporting
+# - Enforce referential integrity between fact and dimension tables
 
 
 
