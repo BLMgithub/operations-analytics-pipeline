@@ -125,34 +125,96 @@ def validate_required_event_timestamps(df: pd.DataFrame) -> None:
 # CONTRACT ENFORCEMENT
 # ------------------------------------------------------------
 
-def deduplicate_exact_events(df: pd.DataFrame):
+def deduplicate_exact_events(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove exact duplicate rows representing the same event.
     """
 
+    logger.info(f'Enforcing deduplication contract!')
+
     initial_count = df.shape[0]
-    logger.info(f'Starting deduplication. Initial rows: {initial_count}')
+    duplicated_mask = df.duplicated()
 
-    df_deduplicated = df.drop_duplicates()
+    if duplicated_mask.any():
+        logger.info(
+            f'Detected duplication! Initial rows: {initial_count}'
+            )
 
-    removed = initial_count - df_deduplicated.shape[0]
-    logger.info(f'Deduplication completed. Rows removed: {removed}')
+        df = df.drop_duplicates()
+
+        result_count = df.shape[0]
+        logger.info(
+            f'Deduplication completed! Resulting rows: {result_count}'
+            )
+        
+    else:
+        logger.info('Contract deduplication passed!')
+
+    return df
 
 
-def remove_unparsable_timestamps(df):
+def remove_unparsable_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove rows where required timestamps cannot be parsed.
     """
 
-    
+    logger.info(f'Enforcing unparsable timestamps contract!')
+
+    initial_count = df.shape[0]
+    unparsable_mask = pd.Series(False, index=df.index)
+
+    for col in REQUIRED_TIMESTAMPS:
+        ts = pd.to_datetime(df[col], errors="coerce")
+        unparsable_mask |= ts.isna()
+
+    if unparsable_mask.any():
+        logger.info(
+            f'Detected unparsable timestamps! Initial rows: {initial_count}'
+            )
+
+        df = df[~unparsable_mask]
+
+        result_count = df.shape[0]
+        logger.info(
+            f'Unparsable timestamps removal completed! Result rows: {result_count}'
+            )
+        
+    else:
+        logger.info(f'Contract unparsable timestamps passed!')
+
+    return df
 
 
-def remove_impossible_timestamps(df):
+def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove rows violating declared temporal invariants (e.g. delivery_date < order_date)
     """
 
+    logger.info('Enfocring impossible timestamps contract!')
 
+    purchase_ts = pd.to_datetime(df['order_purchase_timestamp'])
+    approved_ts = pd.to_datetime(df['order_approved_at'])
+    delivered_ts = pd.to_datetime(df['order_delivered_timestamp'])
+
+    invalid_mask = ((approved_ts < purchase_ts) | (delivered_ts < purchase_ts))
+    initial_count = df.shape[0]
+
+    if invalid_mask.any():
+        logger.info(
+            f'Detected impossible timestamps! Initial rows: {initial_count}'
+            )
+
+        df = df[~invalid_mask]
+
+        result_count = df.shape[0]
+        logger.info(
+            f'Impossible timestamp removal completed! Result rows: {result_count}'
+        )
+
+    else:
+        logger.info(f'Contract impossible timestamps passed!')
+
+    return df
 
 # ------------------------------------------------------------
 # INPUT-OUTPUT HELPER
