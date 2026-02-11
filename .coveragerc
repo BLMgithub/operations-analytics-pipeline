@@ -1,0 +1,3 @@
+[run]
+omit =
+    data_pipeline/prototypes/*
