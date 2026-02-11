@@ -165,6 +165,8 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in REQUIRED_TIMESTAMPS:
         ts = pd.to_datetime(df[col], errors="coerce")
+
+        # accumulate True for every NaT
         unparsable_mask |= ts.isna()
 
     if unparsable_mask.any():

@@ -85,7 +85,7 @@ def run_base_validations(df: pd.DataFrame,
                          table_name: str,
                          primary_key: List[str],
                          report: Dict[str, List[str]]
-                         ) -> None:
+                         ) -> bool:
     """
     Base structural validations.
     
@@ -95,15 +95,8 @@ def run_base_validations(df: pd.DataFrame,
     if df.empty:
         log_error(f'{table_name}: dataset is empty', report)
 
-        return
-
-    duplicate_columns = df.columns[df.columns.duplicated()].tolist()
-    if duplicate_columns:
-        log_error(
-            f'{table_name}: duplicate column names detected: {duplicate_columns}', 
-            report
-            )
-
+        return False
+    
     missing_pk_columns = [col for col in primary_key if col not in df.columns]
     if missing_pk_columns:
         log_error(
@@ -111,7 +104,14 @@ def run_base_validations(df: pd.DataFrame,
             report
             )
 
-        return
+        return False
+    
+    duplicate_columns = df.columns[df.columns.duplicated()].tolist()
+    if duplicate_columns:
+        log_error(
+            f'{table_name}: duplicate column names detected: {duplicate_columns}', 
+            report
+            )
 
     pk_null_count = df[primary_key].isnull().any(axis=1).sum()
     if pk_null_count > 0:
@@ -120,13 +120,14 @@ def run_base_validations(df: pd.DataFrame,
             report
             )
 
-
     duplicate_pk_count = df.duplicated(subset=primary_key).sum()
     if duplicate_pk_count > 0:
         log_error(
             f'{table_name}: {duplicate_pk_count} duplicated primary key value(s)', 
             report
             )
+
+    return True
 
 
 # ------------------------------------------------------------
@@ -136,7 +137,7 @@ def run_base_validations(df: pd.DataFrame,
 def run_event_fact_validations(df: pd.DataFrame,
                                table_name: str,
                                report: Dict[str, List[str]]
-                               ) -> None:
+                               ) -> bool:
     """
     Event fact validations.
 
@@ -157,7 +158,7 @@ def run_event_fact_validations(df: pd.DataFrame,
             report
             )
 
-        return
+        return False
 
     # Timestamps completeness
     parsed = {}
@@ -177,7 +178,7 @@ def run_event_fact_validations(df: pd.DataFrame,
 
     if parsing_failed:
 
-        return
+        return False
 
     purchase_ts = parsed['order_purchase_timestamp']
     approved_ts = parsed['order_approved_at']
@@ -192,7 +193,7 @@ def run_event_fact_validations(df: pd.DataFrame,
             report
             )
 
-        return
+        return False
 
     # Delivery before Purchase
     invalid_delivery = (delivered_ts < purchase_ts).sum()
@@ -202,7 +203,9 @@ def run_event_fact_validations(df: pd.DataFrame,
             report
             )
         
-        return
+        return False
+    
+    return True
 
 
 # ------------------------------------------------------------
@@ -212,7 +215,7 @@ def run_event_fact_validations(df: pd.DataFrame,
 def run_transaction_detail_validations(df: pd.DataFrame,
                                        table_name: str,
                                        report: Dict[str, List[str]]
-                                       ) -> None:
+                                       ) -> bool:
     """
     Transaction detail validations.
 
@@ -229,8 +232,9 @@ def run_transaction_detail_validations(df: pd.DataFrame,
                 report
                 )
 
-            return
+            return False
     
+    return True
 
 # ------------------------------------------------------------
 # CROSS-TABLE VALIDATIONS
@@ -238,7 +242,7 @@ def run_transaction_detail_validations(df: pd.DataFrame,
 
 def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
                                 report: Dict[str, List[str]]
-                                ) -> None:
+                                ) -> bool:
     """
     Cross-table validations.
 
@@ -254,7 +258,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
             report
             )
         
-        return
+        return False
 
     orders_df = tables['df_Orders']
     order_items_df = tables['df_OrderItems']
@@ -271,7 +275,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
             report
             )
         
-        return
+        return False
 
     # Payments to Orders integrity
     orphan_payments = ~payments_df['order_id'].isin(order_id_set)
@@ -281,7 +285,9 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
             report
             )
 
-        return
+        return False
+    
+    return True
 
 # ------------------------------------------------------------
 # INPUT-OUTPUT HELPERS
@@ -354,8 +360,7 @@ def main() -> None:
             csv_path = os.path.join(partition_path, f'{table_name}.csv')
 
             if not os.path.exists(csv_path):
-                log_error(
-                    f'Missing file: {csv_path}', report)
+                log_error(f'Missing file: {csv_path}', report)
 
                 continue
 
@@ -364,7 +369,9 @@ def main() -> None:
                 
                 continue
 
-            run_base_validations(df, table_name, config['primary_key'], report)
+            if not run_base_validations(df, table_name, config['primary_key'], report):
+                
+                continue
 
             if config['role'] == 'event_fact':
                 run_event_fact_validations(df, table_name, report)
