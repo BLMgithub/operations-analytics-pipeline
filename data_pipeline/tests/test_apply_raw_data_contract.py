@@ -1,0 +1,42 @@
+# =============================================================================
+# UNIT TESTS FOR apply_raw_data_contract.py
+# =============================================================================
+
+import pandas as pd
+import pytest
+
+from data_pipeline.apply_raw_data_contract import(
+    validate_primary_key,
+    validate_required_event_timestamps,
+    deduplicate_exact_events,
+    remove_unparsable_timestamps,
+    remove_impossible_timestamps,
+    load_raw_data,
+    write_contracted_data,
+    apply_raw_data_contract
+)
+
+
+# ------------------------------------------------------------
+# FATAL VALIDATION
+# ------------------------------------------------------------
+
+#
+
+# ------------------------------------------------------------
+# CONTRACT ENFORCEMENT
+# ------------------------------------------------------------
+
+#
+
+
+# ------------------------------------------------------------
+# MAIN EXECUTION
+# ------------------------------------------------------------
+
+#
+
+
+# =============================================================================
+# UNIT TESTS END
+# =============================================================================
