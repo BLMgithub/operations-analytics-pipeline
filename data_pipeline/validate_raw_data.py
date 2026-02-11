@@ -8,10 +8,9 @@
 
 import os
 import sys
-import glob
-from typing import Dict, List, Optional
+from typing import Dict, List
 import pandas as pd
-from .io.raw_loader import load_logical_table
+from .io.raw_loader_exporter import load_logical_table
 
 
 # ------------------------------------------------------------
@@ -27,15 +26,15 @@ if VALIDATE_TEST:
     PARTITIONS.append('test')
 
 TABLE_CONFIG = {
-    'df_Orders': {
+    'df_orders': {
         'role': 'event_fact',
         'primary_key': ['order_id']
     },
-    'df_OrderItems': {
+    'df_orderItems': {
         'role': 'transaction_detail',
         'primary_key': ['order_id']
     },
-    'df_Customers': {
+    'df_customers': {
         'role': 'entity_reference',
         'primary_key': ['customer_id']
     },
@@ -237,7 +236,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
     Stops if parent-child attachment semantics are broken.
     """
 
-    required_tables = ['df_Orders', 'df_OrderItems', 'df_payments']
+    required_tables = ['df_orders', 'df_orderItems', 'df_payments']
     missing_tables = [t for t in required_tables if t not in tables]
 
     if missing_tables:
@@ -248,8 +247,8 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
         
         return False
 
-    orders_df = tables['df_Orders']
-    order_items_df = tables['df_OrderItems']
+    orders_df = tables['df_orders']
+    order_items_df = tables['df_orderItems']
     payments_df = tables['df_payments']
 
     # Orders PK reference
@@ -259,7 +258,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
     orphan_items = ~order_items_df['order_id'].isin(order_id_set)
     if orphan_items.any():
         log_warning(
-            f'df_OrderItems: {orphan_items.sum()} orphan record(s) referencing non-existent order_id', 
+            f'df_orderItems: {orphan_items.sum()} orphan record(s) referencing non-existent order_id', 
             report
             )
 

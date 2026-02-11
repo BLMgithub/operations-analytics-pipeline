@@ -1,10 +1,10 @@
 # =============================================================================
-# RAW DATA LOADER
+# RAW DATA LOADER AND EXPORTER
 # =============================================================================
 
 import pandas as pd
 import glob
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 import os
 
 def load_csv_file(csv_path: str, 
@@ -12,9 +12,6 @@ def load_csv_file(csv_path: str,
                   log_info: Optional[Callable[[str], None]] = None,
                   log_error: Optional[Callable[[str], None]] = None,
                   ) -> Optional[pd.DataFrame]:
-    """
-    
-    """
 
     try:
         df = pd.read_csv(csv_path)
@@ -34,14 +31,14 @@ def load_csv_file(csv_path: str,
         return None
 
 
-def load_logical_table(
-    partition_path: str,
-    table_name: str,
-    log_info: Optional[Callable[[str], None]] = None,
-    log_error: Optional[Callable[[str], None]] = None,
-) -> Optional[pd.DataFrame]:
+def load_logical_table(partition_path: str,
+                       table_name: str,
+                       log_info: Optional[Callable[[str], None]] = None,
+                       log_error: Optional[Callable[[str], None]] = None,
+                       ) -> Optional[pd.DataFrame]:
     """
     Load and concatenate all CSV files belonging to a logical table.
+
     Files are identified by filename prefix: <table_name>*.csv
     """
 
@@ -82,3 +79,50 @@ def load_logical_table(
         )
 
     return combined_df
+
+
+def export_file(df: pd.DataFrame,
+                output_path: str,
+                log_info: Optional[Callable[[str], None]] = None,
+                log_error: Optional[Callable[[str], None]] = None,
+                index: bool = False,
+                ) -> bool:
+    """
+    Export DataFrame based on file extension (.csv or .parquet).
+
+    Returns True if successful, False otherwise.
+    """
+
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        _, ext = os.path.splitext(output_path)
+        ext = ext.lower()
+
+        if ext == '.csv':
+            df.to_csv(output_path, index=index)
+
+        elif ext == '.parquet':
+            df.to_parquet(output_path, index=index, engine='pyarrow')
+
+        else:
+            raise ValueError(
+                f'Unsupported file extension: "{ext}". '
+                'Supported: .csv, .parquet'
+            )
+
+        if log_info:
+            log_info(
+                f'Exported {ext} file: '
+                f'{os.path.basename(output_path)} '
+                f'({len(df)} rows)'
+            )
+
+        return True
+
+    except Exception as e:
+        if log_error:
+            log_error(
+                f'Failed to export file {output_path}: {e}'
+            )
+        return False

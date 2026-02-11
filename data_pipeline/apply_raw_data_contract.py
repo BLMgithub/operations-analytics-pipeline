@@ -8,11 +8,11 @@
 
 import os
 import sys
-import glob
+import argparse
 import logging
-from typing import Dict, List, Optional
 import pandas as pd
-
+from typing import Dict, List
+from .io.raw_loader_exporter import load_logical_table, export_file
 
 # ------------------------------------------------------------
 # CONFIGURATIONS
@@ -27,15 +27,15 @@ if VALIDATE_TEST:
     PARTITIONS.append('test')
 
 TABLE_CONFIG = {
-    'df_Orders': {
+    'df_orders': {
         'role': 'event_fact',
         'primary_key': ['order_id']
     },
-    'df_OrderItems': {
+    'df_orderItems': {
         'role': 'transaction_detail',
         'primary_key': ['order_id']
     },
-    'df_Customers': {
+    'df_customers': {
         'role': 'entity_reference',
         'primary_key': ['customer_id']
     },
@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 # FATAL VALIDATION
 # ------------------------------------------------------------
 
-def validate_primary_key(df: pd.DataFrame, primary_key)-> None:
+def validate_primary_key(df: pd.DataFrame, primary_key:str )-> None:
     """
     Primary key must be present and unique.
     
@@ -219,28 +219,66 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ------------------------------------------------------------
-# INPUT-OUTPUT HELPER
-# ------------------------------------------------------------
-
-def load_raw_data(path: Path)-> pd.DataFrame:
-    """
-    Load raw datasets that failed CI validation.
-    """
-
-
-def write_contracted_data(df, output_path: Path)-> None:
-    """
-    Write contract-compliant data to contracted directory.
-
-    Does not overwrite raw data.
-    """
-
-
-# ------------------------------------------------------------
 # MAIN EXECUTION
 # ------------------------------------------------------------
 
-def apply_raw_data_contract()-> None:
+def apply_contract(table_name: str, partition: str) -> None:
+
+    partition_path = os.path.join(RAW_DATA_BASE_PATH, partition)
+
+    if table_name not in TABLE_CONFIG:
+        raise ValueError(f'Unknown table: {table_name}')
+
+    config = TABLE_CONFIG[table_name]
+
+    df = load_logical_table(partition_path, table_name)
+
+    if df is None:
+        raise RuntimeError('Failed to load logical table')
+
+    validate_primary_key(df, config['primary_key'])
+    deduplicate_exact_events(df)
+
+    if config['role'] == 'event_fact':
+        validate_required_event_timestamps(df)
+
+        df = remove_unparsable_timestamps(df)
+        df = remove_impossible_timestamps(df)
+
+    output_path = os.path.join(
+        'data/contracted', 
+        partition, 
+        f'{table_name}.csv'
+        )
+
+    export_file(df, output_path)
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description = 'Apply structural contract to a specific raw table.'
+    )
+
+    parser.add_argument( '--table',
+                        type= str,
+                        required= True,
+                        help= 'table name (e.g. df_Orders)'
+                        )
+
+    parser.add_argument( '--partition',
+                        type = str,
+                        required = True,
+                        help = 'Partition name (e.g. train)'
+                        )
+
+    args = parser.parse_args()
+
+    apply_contract(table_name = args.table.strip().lower(), partition = args.partition)
+
+
+if __name__ == '__main__':
+    main()
 
 
 # =============================================================================
