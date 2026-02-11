@@ -11,6 +11,7 @@ import sys
 import glob
 from typing import Dict, List, Optional
 import pandas as pd
+from .io.raw_loader import load_logical_table
 
 
 # ------------------------------------------------------------
@@ -272,68 +273,20 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
     
     return True
 
-# ------------------------------------------------------------
-# INPUT-OUTPUT HELPERS
-# ------------------------------------------------------------
-
-def load_csv_file(csv_path: str, table_name: str, 
-                  report: Dict[str, List[str]]
-                  ) -> Optional[pd.DataFrame]:
-    try:
-        df = pd.read_csv(csv_path)
-        log_info(f'Loaded {table_name} file: {os.path.basename(csv_path)} ({len(df)} rows)', report)
-
-        return df
-    
-    except Exception as e:
-        log_error(f'Failed to load {table_name} file {csv_path}: {e}', report)
-
-        return None
-
-
-def load_logical_table(partition_path: str,
-                       table_name: str,
-                       report: Dict[str, List[str]]
-                       ) -> Optional[pd.DataFrame]:
-    
-    """
-    Load and concatenate all CSV files belonging to a logical table.
-    Files are identified by filename prefix: <table_name>*.csv
-    """
-
-    pattern = os.path.join(partition_path, f'{table_name}*.csv')
-    csv_files = glob.glob(pattern)
-
-    if not csv_files:
-        log_error(f'{table_name}: no files found matching pattern {pattern}', report)
-        
-        return None
-
-    dfs = []
-    for csv_path in csv_files:
-        df = load_csv_file(csv_path, table_name, report)
-        if df is not None:
-            dfs.append(df)
-
-    if not dfs:
-        log_error(f'{table_name}: all matching files failed to load', report)
-
-        return None
-
-    combined_df = pd.concat(dfs, ignore_index=True)
-    log_info(f'{table_name}: combined {len(csv_files)} file(s) into '
-             f'{len(combined_df)} rows',
-             report)
-
-    return combined_df
-
 
 # ------------------------------------------------------------
 # MAIN EXECUTION
 # ------------------------------------------------------------
 
 def main() -> None:
+
     report = init_report()
+
+    def info(msg: str):
+        log_info(msg, report)
+
+    def error(msg: str):
+        log_error(msg, report)
 
     for partition in PARTITIONS:
         partition_path = os.path.join(RAW_DATA_BASE_PATH, partition)
@@ -347,7 +300,7 @@ def main() -> None:
 
                 continue
 
-            df = load_logical_table(partition_path, table_name, report)
+            df = load_logical_table(partition_path, table_name, log_info = info, log_error = error)
             if df is None:
 
                 continue
