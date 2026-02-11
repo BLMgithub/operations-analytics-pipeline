@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 # FATAL VALIDATION
 # ------------------------------------------------------------
 
-def validate_primary_key(df: pd.DataFrame, primary_key:str )-> None:
+def validate_primary_key(df: pd.DataFrame, primary_key:str )-> bool:
     """
     Primary key must be present and unique.
     
@@ -89,7 +89,7 @@ def validate_primary_key(df: pd.DataFrame, primary_key:str )-> None:
             f'Missing primary key column(s): {missing_pk_columns}'
             )
 
-        raise RuntimeError('Validation failed violation detected!')
+        return False
 
     duplicated_pk_count = df.duplicated(subset= primary_key).sum()
     if duplicated_pk_count > 0:
@@ -97,11 +97,13 @@ def validate_primary_key(df: pd.DataFrame, primary_key:str )-> None:
             f'Duplicated primary key value(s): {duplicated_pk_count}'
             )
 
-        raise RuntimeError('Validation failed violation detected!')
+        return False
 
     logger.info('Primary key validation passed')
+    return True
 
-def validate_required_event_timestamps(df: pd.DataFrame) -> None:
+
+def validate_required_event_timestamps(df: pd.DataFrame) -> bool:
     """
     Required event timestamps must be present.
 
@@ -116,9 +118,10 @@ def validate_required_event_timestamps(df: pd.DataFrame) -> None:
             f'Missing required event timestamps {missing_ts_columns}'
             )
 
-        raise RuntimeError('Validation failed violation detected!')
+        return False
     
     logger.info('Required timestamps validation passed')
+    return True
     
 
 # ------------------------------------------------------------
@@ -218,8 +221,9 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
 # ------------------------------------------------------------
-# MAIN EXECUTION
+# CONTRACT APPLICATION
 # ------------------------------------------------------------
 
 def apply_contract(table_name: str, partition: str) -> None:
@@ -236,23 +240,34 @@ def apply_contract(table_name: str, partition: str) -> None:
     if df is None:
         raise RuntimeError('Failed to load logical table')
 
-    validate_primary_key(df, config['primary_key'])
-    deduplicate_exact_events(df)
+    if not validate_primary_key(df, config['primary_key']):
+        logger.error('Contract halted primary key violation detected!')
+        sys.exit(1)
+
 
     if config['role'] == 'event_fact':
-        validate_required_event_timestamps(df)
+        
+        if not validate_required_event_timestamps(df):
+            logger.error(
+                'Contract halted missing required timestamp(s) violation detected!'
+                )
+            sys.exit(1)
 
+        df = deduplicate_exact_events(df)
         df = remove_unparsable_timestamps(df)
         df = remove_impossible_timestamps(df)
 
-    output_path = os.path.join(
-        'data/contracted', 
-        partition, 
-        f'{table_name}.csv'
-        )
+    elif config["role"] == "transaction_detail":
+        df = deduplicate_exact_events(df)
+
+    output_path = os.path.join('data/contracted', partition, f'{table_name}.csv')
 
     export_file(df, output_path)
 
+
+# ------------------------------------------------------------
+# MAIN EXECUTION
+# ------------------------------------------------------------
 
 def main():
 
