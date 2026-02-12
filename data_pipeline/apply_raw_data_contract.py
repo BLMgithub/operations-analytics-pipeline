@@ -11,7 +11,7 @@ import sys
 import argparse
 import logging
 import pandas as pd
-from typing import Dict, List
+from typing import List
 from .io.raw_loader_exporter import load_logical_table, export_file
 
 # ------------------------------------------------------------
@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 # FATAL VALIDATION
 # ------------------------------------------------------------
 
-def validate_primary_key(df: pd.DataFrame, primary_key:str )-> bool:
+def validate_primary_key(df: pd.DataFrame, primary_key: list[str] )-> bool:
     """
     Primary key must be present and unique.
     
@@ -99,7 +99,7 @@ def validate_primary_key(df: pd.DataFrame, primary_key:str )-> bool:
 
         return False
 
-    logger.info('Primary key validation passed')
+    logger.info('Primary key validation passed!')
     return True
 
 
@@ -120,7 +120,7 @@ def validate_required_event_timestamps(df: pd.DataFrame) -> bool:
 
         return False
     
-    logger.info('Required timestamps validation passed')
+    logger.info('Required timestamps validation passed!')
     return True
     
 
@@ -133,7 +133,7 @@ def deduplicate_exact_events(df: pd.DataFrame) -> pd.DataFrame:
     Remove exact duplicate rows representing the same event.
     """
 
-    logger.info(f'Enforcing deduplication contract!')
+    logger.info(f'Enforcing deduplication contract')
 
     initial_count = df.shape[0]
     duplicated_mask = df.duplicated()
@@ -161,7 +161,7 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     Remove rows where required timestamps cannot be parsed.
     """
 
-    logger.info(f'Enforcing unparsable timestamps contract!')
+    logger.info(f'Enforcing unparsable timestamps contract')
 
     initial_count = df.shape[0]
     unparsable_mask = pd.Series(False, index=df.index)
@@ -195,7 +195,7 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     Remove rows violating declared temporal invariants (e.g. delivery_date < order_date)
     """
 
-    logger.info('Enfocring impossible timestamps contract!')
+    logger.info('Enfocring impossible timestamps contract')
 
     purchase_ts = pd.to_datetime(df['order_purchase_timestamp'])
     approved_ts = pd.to_datetime(df['order_approved_at'])
@@ -262,7 +262,8 @@ def apply_contract(table_name: str, partition: str) -> None:
 
     output_path = os.path.join('data/contracted', partition, f'{table_name}.csv')
 
-    export_file(df, output_path)
+    if export_file(df, output_path):
+        logger.info(f'File successfully exported in data/contracted/{table_name}')
 
 
 # ------------------------------------------------------------

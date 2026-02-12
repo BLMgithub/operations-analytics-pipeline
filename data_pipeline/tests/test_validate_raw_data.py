@@ -34,7 +34,7 @@ def valid_orders_df():
         'order_purchase_timestamp': ['2023-01-01', '2023-01-02'],
         'order_approved_at': ['2023-01-01', '2023-01-02'],
         'order_delivered_timestamp': ['2023-01-03', '2023-01-04'],
-        'order_estimated_delivery_date': ['2023-01-05', '2023-01-06'],
+        'order_estimated_delivery_date': ['2023-01-05', '2023-01-06']
     })
 
 
@@ -43,7 +43,7 @@ def valid_transaction_df():
     return pd.DataFrame({
         'order_id': ['o1', 'o2'],
         'payment_sequential': [1, 1],
-        'payment_value': [100.0, 50.0],
+        'payment_value': [100.0, 50.0]
     })
 
 
@@ -97,7 +97,7 @@ def test_base_validation_fails_on_missing_pk(empty_report):
 def test_base_validation_passes_with_non_fatal_issues(empty_report):
     df = pd.DataFrame({
         'id': ['a', 'a'],
-        'value': [1, 2],
+        'value': [1, 2]
     })
 
     ok = run_base_validations(df, 'df_test', ['id'], empty_report)
@@ -155,7 +155,7 @@ def test_transaction_detail_passes(valid_transaction_df, empty_report):
 def test_transaction_detail_fails_on_negative_value(empty_report):
     df = pd.DataFrame({
         'order_id': ['o1'],
-        'payment_value': [-10],
+        'payment_value': [-10]
     })
 
     ok = run_transaction_detail_validations(
@@ -172,8 +172,8 @@ def test_transaction_detail_fails_on_negative_value(empty_report):
 
 def test_cross_table_validation_passes(valid_orders_df, valid_transaction_df, empty_report):
     tables = {
-        'df_Orders': valid_orders_df,
-        'df_OrderItems': pd.DataFrame({'order_id': ['o1']}),
+        'df_orders': valid_orders_df,
+        'df_orderItems': pd.DataFrame({'order_id': ['o1']}),
         'df_payments': valid_transaction_df,
     }
 
