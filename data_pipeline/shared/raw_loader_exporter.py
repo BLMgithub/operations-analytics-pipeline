@@ -4,89 +4,88 @@
 
 from pathlib import Path
 import pandas as pd
-import glob
 from typing import Optional, Callable, Literal
-import os
 
-def load_csv_file(csv_path: Path, 
-                  table_name: str,
-                  log_info: Optional[Callable[[str], None]] = None,
-                  log_error: Optional[Callable[[str], None]] = None,
-                  ) -> Optional[pd.DataFrame]:
-
-    try:
-        df = pd.read_csv(csv_path)
-
-        if log_info:
-            log_info(
-                f'Loaded {table_name} file: {os.path.basename(csv_path)} ({len(df)} rows)'
-            )
-
-        return df
-
-    except Exception as e:
-        if log_error:
-            log_error(
-                f'Failed to load {table_name} file {csv_path}: {e}'
-            )
-        return None
+def load_csv_file(path: Path) -> pd.DataFrame:
+    
+    return pd.read_csv(path)
 
 
-def load_logical_table(directory_path: Path,
+
+def load_parquet_file(parquet_path: Path,) -> pd.DataFrame:
+    
+    return pd.read_parquet(parquet_path, engine= 'pyarrow')    
+    
+    
+FILE_LOADERS = {
+    '.csv': load_csv_file,
+    '.parquet': load_parquet_file,
+}
+
+
+
+def load_logical_table(base_path: Path,
                        table_name: str,
                        log_info: Optional[Callable[[str], None]] = None,
-                       log_error: Optional[Callable[[str], None]] = None,
+                       log_error: Optional[Callable[[str], None]] = None
                        ) -> Optional[pd.DataFrame]:
     """
-    Load and concatenate all CSV files belonging to a logical table.
+    Load and concatenate all CSV/Parquet files belonging to a logical table.
 
-    Files are identified by filename prefix: <table_name>*.csv
+    Files are identified by filename prefix: <table_name>*.csv or <table_name>*.parquet 
     """
-
-    directory_path = Path(directory_path)
     
-    pattern = f'{table_name}_*.csv'
-    csv_files = sorted(directory_path.glob(pattern))
-
-    if not csv_files:
+    base_path = Path(base_path)
+    
+    # List valid files and check format with FILE_LOADERS
+    files = [
+        f for f in base_path.iterdir()
+        if f.is_file()
+        and f.name.startswith(f'{table_name}_')
+        and f.suffix.lower() in FILE_LOADERS
+    ]
+    
+    if not files:
         if log_error:
-            log_error(
-                f'{table_name}: no files found matching pattern {pattern}'
-            )
+            log_error(f'{table_name}: no files found in {base_path}')
+    
         return None
+    
+    # Prevent mixed file formats
+    extensions = {f.suffix.lower() for f in files}
+    if len(extensions) > 1:
+        raise RuntimeError(f'Mixed file formats detected for {table_name}')
 
     dfs = []
+    files = sorted(files)
     
-    for csv_path in csv_files:
-        df = load_csv_file(
-            csv_path,
-            table_name,
-            log_info=log_info,
-            log_error=log_error,
-        )
-        if df is not None:
+    # Route each file using it's format to its registered loader
+    for file_path in files:
+        loader = FILE_LOADERS[file_path.suffix.lower()]
+        
+        try:
+            df = loader(file_path)
+            
+            if log_info:
+                log_info(f'loaded {file_path.name} ({len(df)} rows)')
+                
             dfs.append(df)
-
+            
+        except Exception as e:
+            if log_error:
+                log_error(f'failed loading {file_path.name}: {e}')
+                
     if not dfs:
         if log_error:
-            log_error(
-                f'{table_name}: all matching files failed to load'
-            )
+            log_error(f'{table_name}: all matching files failed to load')
         return None
+           
+    return pd.concat(dfs, ignore_index=True)
 
-    combined_df = pd.concat(dfs, ignore_index=True)
-
-    if log_info:
-        log_info(
-            f'{table_name}: combined {len(csv_files)} file(s) into '
-            f'{len(combined_df)} rows'
-        )
-
-    return combined_df
 
 
 def export_file(df: pd.DataFrame,
-                output_path: str,
+                output_path: Path,
                 log_info: Optional[Callable[[str], None]] = None,
                 log_error: Optional[Callable[[str], None]] = None,
                 index: bool = False,
@@ -95,19 +94,20 @@ def export_file(df: pd.DataFrame,
     Export DataFrame based on file extension (.csv or .parquet).
 
     Returns True if successful, False otherwise.
+    
     """
+    output_path = Path(output_path)
 
     try:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-        _, ext = os.path.splitext(output_path)
-        ext = ext.lower()
+        # Ensure parent directory exists
+        output_path.parent.mkdir(parents= True, exist_ok = True)
+        ext = output_path.suffix.lower()
 
         if ext == '.csv':
-            df.to_csv(output_path, index=index)
+            df.to_csv(output_path, index = index)
 
         elif ext == '.parquet':
-            df.to_parquet(output_path, index=index, engine='pyarrow')
+            df.to_parquet(output_path, index = index, engine = 'pyarrow')
 
         else:
             raise ValueError(
@@ -118,7 +118,7 @@ def export_file(df: pd.DataFrame,
         if log_info:
             log_info(
                 f'Exported {ext} file: '
-                f'{os.path.basename(output_path)} '
+                f'{output_path.name} '
                 f'({len(df)} rows)'
             )
 
@@ -126,7 +126,6 @@ def export_file(df: pd.DataFrame,
 
     except Exception as e:
         if log_error:
-            log_error(
-                f'Failed to export file {output_path}: {e}'
-            )
+            log_error(f'Failed to export file {output_path}: {e}')
+        
         return False

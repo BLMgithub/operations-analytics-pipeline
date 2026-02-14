@@ -6,25 +6,15 @@
 # - Produce a contract-compliant dataset suitable for CI validation and downstream assembly
 
 
-import os
-import sys
-import argparse
-import logging
 import pandas as pd
 from typing import List
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
+from data_pipeline.shared.run_context import RunContext
+from pathlib import Path
 
 # ------------------------------------------------------------
 # CONFIGURATIONS
 # ------------------------------------------------------------
-
-RAW_DATA_BASE_PATH = 'data/raw'
-VALIDATE_TEST = os.getenv('VALIDATE_TEST', 'false').lower() == 'true'
-
-PARTITIONS = ['train']
-
-if VALIDATE_TEST:
-    PARTITIONS.append('test')
 
 TABLE_CONFIG = {
     'df_orders': {
@@ -56,19 +46,6 @@ REQUIRED_TIMESTAMPS = [
     'order_estimated_delivery_date',
 ]
 
-# ------------------------------------------------------------
-# LOGGING CONFIGURATION
-# ------------------------------------------------------------
-
-logging.basicConfig(
-    level = logging.INFO,
-    format = '%(asctime)s | %(levelname)s | %(message)s ',
-    datefmt= '%Y-%m-%d %H:%M:%S',
-    stream = sys.stdout
-)
-
-logger = logging.getLogger(__name__)
-
 
 # ------------------------------------------------------------
 # FATAL VALIDATION
@@ -81,25 +58,16 @@ def validate_primary_key(df: pd.DataFrame, primary_key: list[str] )-> bool:
     Any violation halts contract enforcement.
     """
 
-    logger.info('Validating primary key uniqueness and completeness')
-
     missing_pk_columns = [col for col in primary_key if col not in df.columns]
     if missing_pk_columns:
-        logger.error(
-            f'Missing primary key column(s): {missing_pk_columns}'
-            )
 
         return False
 
     duplicated_pk_count = df.duplicated(subset= primary_key).sum()
     if duplicated_pk_count > 0:
-        logger.error(
-            f'Duplicated primary key value(s): {duplicated_pk_count}'
-            )
-
+        
         return False
 
-    logger.info('Primary key validation passed!')
     return True
 
 
@@ -110,17 +78,11 @@ def validate_required_event_timestamps(df: pd.DataFrame) -> bool:
     Violation halts contract enforcement.
     """
 
-    logger.info('Validating required event timestamps')
-
     missing_ts_columns = [col for col in REQUIRED_TIMESTAMPS if col not in df.columns]
     if missing_ts_columns:
-        logger.error(
-            f'Missing required event timestamps {missing_ts_columns}'
-            )
 
         return False
     
-    logger.info('Required timestamps validation passed!')
     return True
     
 
@@ -128,40 +90,29 @@ def validate_required_event_timestamps(df: pd.DataFrame) -> bool:
 # CONTRACT ENFORCEMENT
 # ------------------------------------------------------------
 
-def deduplicate_exact_events(df: pd.DataFrame) -> pd.DataFrame:
+def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """
     Remove exact duplicate rows representing the same event.
     """
-
-    logger.info(f'Enforcing deduplication contract')
 
     initial_count = df.shape[0]
     duplicated_mask = df.duplicated()
 
     if duplicated_mask.any():
-        logger.info(
-            f'Detected duplication! Initial rows: {initial_count}'
-            )
 
         df = df.drop_duplicates()
-
-        result_count = df.shape[0]
-        logger.info(
-            f'Deduplication completed! Resulting rows: {result_count}'
-            )
+        removed_count = initial_count - df.shape[0]
         
     else:
-        logger.info('Contract deduplication passed!')
+        removed_count = 0
 
-    return df
+    return df, removed_count
 
 
-def remove_unparsable_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """
     Remove rows where required timestamps cannot be parsed.
     """
-
-    logger.info(f'Enforcing unparsable timestamps contract')
 
     initial_count = df.shape[0]
     unparsable_mask = pd.Series(False, index=df.index)
@@ -173,29 +124,20 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> pd.DataFrame:
         unparsable_mask |= ts.isna()
 
     if unparsable_mask.any():
-        logger.info(
-            f'Detected unparsable timestamps! Initial rows: {initial_count}'
-            )
 
         df = df[~unparsable_mask]
-
-        result_count = df.shape[0]
-        logger.info(
-            f'Unparsable timestamps removal completed! Result rows: {result_count}'
-            )
+        remove_count =  initial_count - df.shape[0]
         
     else:
-        logger.info(f'Contract unparsable timestamps passed!')
+        remove_count = 0
 
-    return df
+    return df, remove_count
 
 
-def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """
     Remove rows violating declared temporal invariants (e.g. delivery_date < order_date)
     """
-
-    logger.info('Enfocring impossible timestamps contract')
 
     purchase_ts = pd.to_datetime(df['order_purchase_timestamp'])
     approved_ts = pd.to_datetime(df['order_approved_at'])
@@ -205,97 +147,86 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     initial_count = df.shape[0]
 
     if invalid_mask.any():
-        logger.info(
-            f'Detected impossible timestamps! Initial rows: {initial_count}'
-            )
 
         df = df[~invalid_mask]
-
-        result_count = df.shape[0]
-        logger.info(
-            f'Impossible timestamp removal completed! Result rows: {result_count}'
-        )
-
+        remove_count = initial_count - df.shape[0]
+        
     else:
-        logger.info(f'Contract impossible timestamps passed!')
+        remove_count = 0
 
-    return df
+    return df, remove_count
 
 
 # ------------------------------------------------------------
 # CONTRACT APPLICATION
 # ------------------------------------------------------------
 
-def apply_contract(table_name: str, partition: str) -> None:
-
-    partition_path = os.path.join(RAW_DATA_BASE_PATH, partition)
+def apply_contract(run_context: RunContext, table_name: str) -> dict:
+    
+    report = {
+    'table': table_name,
+    'initial_rows': 0,
+    'final_rows': 0,
+    'deduplicated_rows': 0,
+    'removed_unparsable_timestamps': 0,
+    'removed_impossible_timestamps': 0,
+    'status': 'success',
+    'errors': [] 
+    }
 
     if table_name not in TABLE_CONFIG:
-        raise ValueError(f'Unknown table: {table_name}')
+        report['status'] = 'failed'
+        report['errors'].append(f'Unknown table: {table_name}')
+        return report
 
+    base_path = run_context.raw_snapshot_path
     config = TABLE_CONFIG[table_name]
 
-    df = load_logical_table(partition_path, table_name)
-
+    df = load_logical_table(base_path, table_name)
+   
     if df is None:
-        raise RuntimeError('Failed to load logical table')
-
+        report['status'] = 'failed'
+        report['errors'].append('Failed to load logical table')
+        return report
+     
+    report['initial_rows'] = len(df)
+    
     if not validate_primary_key(df, config['primary_key']):
-        logger.error('Contract halted primary key violation detected!')
-        sys.exit(1)
-
+        report['status'] = 'failed'
+        report['errors'].append('Primary key violation detected')
+        return report
 
     if config['role'] == 'event_fact':
         
         if not validate_required_event_timestamps(df):
-            logger.error(
-                'Contract halted missing required timestamp(s) violation detected!'
-                )
-            sys.exit(1)
+            report['status'] = 'failed'
+            report['errors'].append('Missing required timestamp(s)')
+            return report
 
-        df = deduplicate_exact_events(df)
-        df = remove_unparsable_timestamps(df)
-        df = remove_impossible_timestamps(df)
+        df, removed = deduplicate_exact_events(df)
+        report['deduplicated_rows'] += removed
+        
+        df, removed = remove_unparsable_timestamps(df)
+        report['removed_unparsable_timestamps'] += removed
+        
+        df, removed = remove_impossible_timestamps(df)
+        report['removed_impossible_timestamps'] += removed
 
-    elif config["role"] == "transaction_detail":
-        df = deduplicate_exact_events(df)
+    elif config['role'] == 'transaction_detail':
+        df, removed = deduplicate_exact_events(df)
+        report['deduplicated_rows'] += removed
+    
+    elif config['role'] == 'entity_reference':
+        pass
 
-    output_path = os.path.join('data/contracted', partition, f'{table_name}.csv')
-
-    if export_file(df, output_path):
-        logger.info(f'File successfully exported in data/contracted/{table_name}')
-
-
-# ------------------------------------------------------------
-# MAIN EXECUTION
-# ------------------------------------------------------------
-
-def main():
-
-    parser = argparse.ArgumentParser(
-        description = 'Apply structural contract to a specific raw table.'
-    )
-
-    parser.add_argument( '--table',
-                        type= str,
-                        required= True,
-                        help= 'table name (e.g. df_Orders)'
-                        )
-
-    parser.add_argument( '--partition',
-                        type = str,
-                        required = True,
-                        help = 'Partition name (e.g. train)'
-                        )
-
-    args = parser.parse_args()
-
-    apply_contract(table_name = args.table.strip().lower(), partition = args.partition)
-
-
-if __name__ == '__main__':
-    main()
-
+    report['final_rows'] = len(df)
+    
+    output_path = run_context.contracted_path / f'{table_name}_contracted.parquet'
+    if not export_file(df, output_path):
+        report['status'] = 'failed'
+        report['errors'].append('Export failed')
+        
+    return report
 
 # =============================================================================
 # END OF SCRIPT

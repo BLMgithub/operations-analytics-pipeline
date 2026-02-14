@@ -271,8 +271,11 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
 # VALIDATE DATA
 # ------------------------------------------------------------
 
-def apply_validation(run_context: RunContext) -> Dict:
+def apply_validation(run_context: RunContext, base_path: Path | None = None) -> Dict:
     
+    if base_path is None:
+            base_path = run_context.raw_snapshot_path
+            
     report = init_report()
     
     def info(msg: str):
@@ -282,7 +285,6 @@ def apply_validation(run_context: RunContext) -> Dict:
         log_error(msg, report)
     
     tables: Dict[str, pd.DataFrame] = {}
-    base_path = run_context.raw_snapshot_path
     
     # Get assigned table role
     for table_name, config in TABLE_CONFIG.items():
