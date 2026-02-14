@@ -10,27 +10,21 @@ import os
 import sys
 from typing import Dict, List
 import pandas as pd
-from .io.raw_loader_exporter import load_logical_table
+from data_pipeline.shared.raw_loader_exporter import load_logical_table
+from data_pipeline.shared.run_context import RunContext
+from pathlib import Path
 
 
 # ------------------------------------------------------------
 # CONFIGURATIONS
 # ------------------------------------------------------------
 
-RAW_DATA_BASE_PATH = 'data/raw'
-VALIDATE_TEST = os.getenv('VALIDATE_TEST', 'false').lower() == 'true'
-
-PARTITIONS = ['train']
-
-if VALIDATE_TEST:
-    PARTITIONS.append('test')
-
 TABLE_CONFIG = {
     'df_orders': {
         'role': 'event_fact',
         'primary_key': ['order_id']
     },
-    'df_orderItems': {
+    'df_order_items': {
         'role': 'transaction_detail',
         'primary_key': ['order_id']
     },
@@ -236,7 +230,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
     Stops if parent-child attachment semantics are broken.
     """
 
-    required_tables = ['df_orders', 'df_orderItems', 'df_payments']
+    required_tables = ['df_orders', 'df_order_items', 'df_payments']
     missing_tables = [t for t in required_tables if t not in tables]
 
     if missing_tables:
@@ -248,7 +242,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
         return False
 
     orders_df = tables['df_orders']
-    order_items_df = tables['df_orderItems']
+    order_items_df = tables['df_order_items']
     payments_df = tables['df_payments']
 
     # Orders PK reference
@@ -258,7 +252,7 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
     orphan_items = ~order_items_df['order_id'].isin(order_id_set)
     if orphan_items.any():
         log_warning(
-            f'df_orderItems: {orphan_items.sum()} orphan record(s) referencing non-existent order_id', 
+            f'df_order_items: {orphan_items.sum()} orphan record(s) referencing non-existent order_id', 
             report
             )
 
@@ -274,59 +268,45 @@ def run_cross_table_validations(tables: Dict[str, pd.DataFrame],
 
 
 # ------------------------------------------------------------
-# MAIN EXECUTION
+# VALIDATE DATA
 # ------------------------------------------------------------
 
-def main() -> None:
-
+def apply_validation(run_context: RunContext) -> Dict:
+    
     report = init_report()
-
+    
     def info(msg: str):
         log_info(msg, report)
-
+        
     def error(msg: str):
         log_error(msg, report)
-
-    for partition in PARTITIONS:
-        partition_path = os.path.join(RAW_DATA_BASE_PATH, partition)
-        tables: Dict[str, pd.DataFrame] = {}
-
-        for table_name, config in TABLE_CONFIG.items():
-            csv_path = os.path.join(partition_path, f'{table_name}.csv')
-
-            if not os.path.exists(csv_path):
-                log_error(f'Missing file: {csv_path}', report)
-
-                continue
-
-            df = load_logical_table(partition_path, table_name, log_info = info, log_error = error)
-            if df is None:
-
-                continue
-
-            if not run_base_validations(df, table_name, config['primary_key'], report):
-                
-                continue
-
-            if config['role'] == 'event_fact':
-                run_event_fact_validations(df, table_name, report)
-
-            elif config['role'] == 'transaction_detail':
-                run_transaction_detail_validations(df, table_name, report)
-
-            tables[table_name] = df
-
-        run_cross_table_validations(tables, report)
-
-    if report['errors'] or report['warnings']:
-        sys.exit(1)
-
-    sys.exit(0)
-
-
-if __name__ == '__main__':
-    main()
-
+    
+    tables: Dict[str, pd.DataFrame] = {}
+    base_path = run_context.raw_snapshot_path
+    
+    # Get assigned table role
+    for table_name, config in TABLE_CONFIG.items():
+        
+        df = load_logical_table(base_path, table_name, log_info = info, log_error = error)
+    
+        if df is None:
+            continue
+        
+        if not run_base_validations(df, table_name, config['primary_key'], report):
+            continue
+        
+        if config['role'] == 'event_fact':
+            run_event_fact_validations(df, table_name, report)
+        
+        elif config['role'] == 'transaction_detail':
+            run_transaction_detail_validations(df, table_name, report)
+            
+        tables[table_name] = df
+        
+    run_cross_table_validations(tables, report)
+    
+    return report
+ 
 
 # =============================================================================
 # END OF SCRIPT

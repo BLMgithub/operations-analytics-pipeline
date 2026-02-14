@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Runtime Directory
+data/runs/
+data/published/
+
 # C extensions
 *.so
 

@@ -5,8 +5,8 @@
 import pandas as pd
 import pytest
 
-from data_pipeline import apply_raw_data_contract as module_contract
-from data_pipeline.apply_raw_data_contract import(
+from data_pipeline.stages import apply_raw_data_contract as module_contract
+from data_pipeline.stages.apply_raw_data_contract import(
     validate_primary_key,
     validate_required_event_timestamps,
     deduplicate_exact_events,

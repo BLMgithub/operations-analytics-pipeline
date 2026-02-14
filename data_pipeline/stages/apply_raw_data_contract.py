@@ -12,7 +12,7 @@ import argparse
 import logging
 import pandas as pd
 from typing import List
-from .io.raw_loader_exporter import load_logical_table, export_file
+from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
 # ------------------------------------------------------------
 # CONFIGURATIONS
@@ -31,7 +31,7 @@ TABLE_CONFIG = {
         'role': 'event_fact',
         'primary_key': ['order_id']
     },
-    'df_orderItems': {
+    'df_order_items': {
         'role': 'transaction_detail',
         'primary_key': ['order_id']
     },

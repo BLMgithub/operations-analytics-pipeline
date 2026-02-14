@@ -5,7 +5,8 @@
 import pandas as pd
 import pytest
 
-from data_pipeline.validate_raw_data import (
+from data_pipeline.shared.run_context import RunContext
+from data_pipeline.stages.validate_raw_data import (
     init_report,
     log_info,
     log_warning,
@@ -14,7 +15,7 @@ from data_pipeline.validate_raw_data import (
     run_event_fact_validations,
     run_transaction_detail_validations,
     run_cross_table_validations,
-    main
+    apply_validation
 )
 
 
@@ -46,6 +47,28 @@ def valid_transaction_df():
         'payment_value': [100.0, 50.0]
     })
 
+
+@pytest.fixture
+def valid_order_items_df():
+    return pd.DataFrame({
+        'order_id': ['o1'],
+        'product_id': ['prod_x'],
+        'seller_id': ['seller_x']
+    })
+
+@pytest.fixture
+def valid_customers_df():    
+    return pd.DataFrame({
+        'customer_id': ['o1'],
+        'customer_zip': [12345]
+    })
+    
+@pytest.fixture
+def valid_products_df():
+    return pd.DataFrame({
+        'product_id': ['o1'],
+        'category_name': ['category1']
+    })
 
 # ------------------------------------------------------------
 # VALIDATION REPORT & LOGS
@@ -173,7 +196,7 @@ def test_transaction_detail_fails_on_negative_value(empty_report):
 def test_cross_table_validation_passes(valid_orders_df, valid_transaction_df, empty_report):
     tables = {
         'df_orders': valid_orders_df,
-        'df_orderItems': pd.DataFrame({'order_id': ['o1']}),
+        'df_order_items': pd.DataFrame({'order_id': ['o1']}),
         'df_payments': valid_transaction_df,
     }
 
@@ -192,80 +215,65 @@ def test_cross_table_fails_on_missing_table(empty_report):
 
 
 # ------------------------------------------------------------
-# CI- GATE TEST (ERRORS & WARNING FAILS CI) 
+# APPLY VALIDATION
 # ------------------------------------------------------------
 
-def test_main_exits_with_error_when_base_validation_fails(monkeypatch):
+def test_validation_passes(tmp_path, 
+                           valid_orders_df, 
+                           valid_transaction_df, 
+                           valid_order_items_df, 
+                           valid_customers_df,
+                           valid_products_df):
+    
+    # Dummy raw structure
+    raw_dir = tmp_path / 'raw'
+    raw_dir.mkdir()
+    
+    # Dummy required tables
+    df_orders = valid_orders_df
+    df_order_items = valid_order_items_df
+    df_payments = valid_transaction_df
+    df_customers = valid_customers_df
+    df_products = valid_products_df
+    
+    
+    df_orders.to_csv(raw_dir / 'df_orders_2026_01.csv', index= False)
+    df_order_items.to_csv(raw_dir / 'df_order_items_2026_01.csv', index= False)
+    df_payments.to_csv(raw_dir / 'df_payments_2026_01.csv', index= False)
+    df_customers.to_csv(raw_dir / 'df_customers_2026_01.csv', index= False)
+    df_products.to_csv(raw_dir / 'df_products_2026_01.csv', index= False)
+    
+    
+    run_context = RunContext.create(base_path = tmp_path)
+    run_context.initialize_directories()
+    
+    from shutil import copytree
+    copytree(raw_dir, run_context.raw_snapshot_path, dirs_exist_ok= True)
+    
+    report = apply_validation(run_context)
+    
+    assert len(report['errors']) == 0
+    
 
-    # Force base validation to fail
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.run_base_validations',
-        lambda *args, **kwargs: False
-    )
-
-    # Bypass file loading to avoid filesystem dependency
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.load_logical_table',
-        lambda *args, **kwargs: []
-    )
-
-    # Force file existence check to pass
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.os.path.exists',
-        lambda *args, **kwargs: True
-    )
-
-    # error > 0 == sys.exit(1)
-    with pytest.raises(SystemExit) as exc:
-        main()
-
-    # Failed CI
-    assert exc.value.code == 1
-
-
-def test_main_exits_when_only_warnings_exist(monkeypatch):
-
-    # Force base validation to pass
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.run_base_validations',
-        lambda *args, **kwargs: True
-    )
-
-    # Force event validation to generate a warning
-    def fake_event_validation(*args, **kwargs):
-        report = args[-1]
-        report['warnings'].append('integrity issue')
-        return True
-
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.run_event_fact_validations',
-        fake_event_validation
-    )
-
-    # Avoid filesystem dependency
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.load_logical_table',
-        lambda *args, **kwargs: pd.DataFrame({
-            'order_id': ['o1'],
-            'order_purchase_timestamp': ['2023-01-01'],
-            'order_approved_at': ['2023-01-01'],
-            'order_delivered_timestamp': ['2023-01-02'],
-            'order_estimated_delivery_date': ['2023-01-03'],
-            })
-    )
-
-    monkeypatch.setattr(
-        'data_pipeline.validate_raw_data.os.path.exists',
-        lambda *args, **kwargs: True
-    )
-
-    # if warnings > 0 == sys.exit(1)
-    with pytest.raises(SystemExit) as exc:
-        main()
-
-    # Failed CI
-    assert exc.value.code == 1
-
+def test_validation_fails_on_multiple_errors(tmp_path, valid_orders_df):
+    
+    raw_dir = tmp_path / 'raw'
+    raw_dir.mkdir()
+    
+    df_orders = valid_orders_df    
+    
+    df_orders.to_csv(raw_dir / 'df_orders_2026_01.csv', index= False)    
+    
+    run_context = RunContext.create(base_path = tmp_path)
+    run_context.initialize_directories()
+    
+    from shutil import copytree
+    copytree(raw_dir, run_context.raw_snapshot_path, dirs_exist_ok= True)
+    
+    report = apply_validation(run_context)
+    
+    assert len(report['errors']) > 1
+    
 # =============================================================================
 # UNIT TESTS END
 # =============================================================================

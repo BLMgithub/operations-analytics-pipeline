@@ -2,12 +2,13 @@
 # RAW DATA LOADER AND EXPORTER
 # =============================================================================
 
+from pathlib import Path
 import pandas as pd
 import glob
 from typing import Optional, Callable, Literal
 import os
 
-def load_csv_file(csv_path: str, 
+def load_csv_file(csv_path: Path, 
                   table_name: str,
                   log_info: Optional[Callable[[str], None]] = None,
                   log_error: Optional[Callable[[str], None]] = None,
@@ -31,7 +32,7 @@ def load_csv_file(csv_path: str,
         return None
 
 
-def load_logical_table(partition_path: str,
+def load_logical_table(directory_path: Path,
                        table_name: str,
                        log_info: Optional[Callable[[str], None]] = None,
                        log_error: Optional[Callable[[str], None]] = None,
@@ -42,8 +43,10 @@ def load_logical_table(partition_path: str,
     Files are identified by filename prefix: <table_name>*.csv
     """
 
-    pattern = os.path.join(partition_path, f'{table_name}*.csv')
-    csv_files = glob.glob(pattern)
+    directory_path = Path(directory_path)
+    
+    pattern = f'{table_name}_*.csv'
+    csv_files = sorted(directory_path.glob(pattern))
 
     if not csv_files:
         if log_error:
@@ -53,6 +56,7 @@ def load_logical_table(partition_path: str,
         return None
 
     dfs = []
+    
     for csv_path in csv_files:
         df = load_csv_file(
             csv_path,
