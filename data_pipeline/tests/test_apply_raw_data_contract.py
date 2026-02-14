@@ -4,14 +4,16 @@
 
 import pandas as pd
 import pytest
+from shutil import copytree
 
-from data_pipeline.stages import apply_raw_data_contract as module_contract
+from data_pipeline.shared.run_context import RunContext
 from data_pipeline.stages.apply_raw_data_contract import(
     validate_primary_key,
     validate_required_event_timestamps,
     deduplicate_exact_events,
     remove_unparsable_timestamps,
     remove_impossible_timestamps,
+    apply_contract
 )
 
 
@@ -100,7 +102,7 @@ def test_deduplicate_exact_events_passed():
         'value': [1, 2]
     })
 
-    result = deduplicate_exact_events(df)
+    result, _ = deduplicate_exact_events(df)
 
     assert len(result) == 2
     assert result.iloc[0]['id'] == 'x'
@@ -115,7 +117,7 @@ def test_deduplicate_exact_events_removes_duplicates():
         'value': [1, 1]
     })
 
-    result = deduplicate_exact_events(df)
+    result,_ = deduplicate_exact_events(df)
 
     assert len(result) == 1
     assert result.iloc[0]['id'] == 'x'
@@ -137,7 +139,7 @@ def test_remove_unparsable_timestamps_passed(valid_orders_df):
 def test_remove_unparsable_timestamps_drops_invalid_rows(invalid_order_df):
     
     initial_count = len(invalid_order_df)
-    result = remove_unparsable_timestamps(invalid_order_df)
+    result, _ = remove_unparsable_timestamps(invalid_order_df)
 
     assert len(result) < initial_count
 
@@ -157,7 +159,7 @@ def test_remove_impossible_timestamps(valid_orders_df):
 def test_remove_impossible_timestamps_drops_invalid_rows(invalid_temporal_order_df):
     
     initial_count = len(invalid_temporal_order_df)
-    result = remove_impossible_timestamps(invalid_temporal_order_df)
+    result, _ = remove_impossible_timestamps(invalid_temporal_order_df)
     
     assert len(result) < initial_count
 
@@ -166,87 +168,117 @@ def test_remove_impossible_timestamps_drops_invalid_rows(invalid_temporal_order_
 # CONTRACT APPLICATION
 # ------------------------------------------------------------
 
-def test_apply_contract_halts_on_primary_key_failure(monkeypatch):
+def test_apply_contract_event_fact_success(tmp_path):
+
+    raw_dir = tmp_path / 'raw'
+    raw_dir.mkdir()
+
+    df = pd.DataFrame({
+        'order_id': [1, 2, 3, 4],
+        'order_purchase_timestamp': [
+            '2026-01-01',
+            '2026-01-01',  # duplicate
+            'bad_timestamp', # unparsable
+            '2026-01-03'
+        ],
+        'order_approved_at': [
+            '2026-01-01',
+            '2026-01-01',
+            '2026-01-02',
+            '2025-12-01'  # impossible (before purchase)
+        ],
+        'order_delivered_timestamp': [
+            '2026-01-05',
+            '2026-01-05',
+            '2026-01-06',
+            '2026-01-02'
+        ],
+        'order_estimated_delivery_date': [
+            '2026-01-06',
+            '2026-01-06',
+            '2026-01-07',
+            '2026-01-04'
+        ],
+    })
+
+    df.to_csv(raw_dir / 'df_orders_2026_01.csv', index=False)
+
+    run_context = RunContext.create(base_path=tmp_path)
+    run_context.initialize_directories()
+
+    copytree(raw_dir, run_context.raw_snapshot_path, dirs_exist_ok=True)
+
+    report = apply_contract(run_context, 'df_orders')
+
+    assert report['deduplicated_rows'] == 0
+    assert report['removed_unparsable_timestamps'] == 1
+    assert report['removed_impossible_timestamps'] == 1
+    assert report['final_rows'] == 2
+
+    output_file = run_context.contracted_path / 'df_orders_contracted.parquet'
     
-    # Dummy config
-    monkeypatch.setattr(
-        module_contract,
-        'TABLE_CONFIG',
-        {'df_orders': {'role': 'event_fact', 'primary_key': ['id']}}
-    )
+    assert output_file.exists()
 
-    # Force to fail in PK validation
-    monkeypatch.setattr(
-        module_contract,
-        'load_logical_table',
-        lambda *args, **kwargs: pd.DataFrame({'x': [1, 2]})
-    )
 
-    # Dummy exporter so it doesn't write
-    monkeypatch.setattr(
-        module_contract,
-        'export_file',
-        lambda *args, **kwargs: True
-    )
+def test_apply_contract_unknown_table(tmp_path):
 
-    # Validation detected == sys.exit(1)
-    with pytest.raises(SystemExit) as exc:
-        module_contract.apply_contract('df_orders', 'train')
+    run_context = RunContext.create(base_path=tmp_path)
+    run_context.initialize_directories()
+
+    report = apply_contract(run_context, 'unknown_table')
+
+    assert report['status'] == 'failed'
+    assert 'Unknown table' in report['errors'][0]
     
-    # Halts enforcement
-    assert exc.value.code == 1
+    
+def test_apply_contract_duplicate_pk(tmp_path):
 
+    raw_dir = tmp_path / 'raw'
+    raw_dir.mkdir()
 
-def test_apply_contract_calls_export(monkeypatch, valid_orders_df):
+    df = pd.DataFrame({
+        'order_id': [1, 1],  # duplicate PK
+        'order_purchase_timestamp': ['2026-01-01', '2026-01-02'],
+        'order_approved_at': ['2026-01-01', '2026-01-02'],
+        'order_delivered_timestamp': ['2026-01-03', '2026-01-04'],
+        'order_estimated_delivery_date': ['2026-01-05', '2026-01-06'],
+    })
 
-    monkeypatch.setattr(
-        module_contract,
-        'TABLE_CONFIG',
-        {'df_orders': {'role': 'event_fact', 'primary_key': ['order_id']}}
-    )
+    df.to_csv(raw_dir / 'df_orders_2026_01.csv', index=False)
 
-    monkeypatch.setattr(
-        module_contract,
-        'load_logical_table',
-        lambda *args, **kwargs: valid_orders_df
-    )
+    run_context = RunContext.create(base_path=tmp_path)
+    run_context.initialize_directories()
 
-    called = {'export': False}
+    copytree(raw_dir, run_context.raw_snapshot_path, dirs_exist_ok=True)
 
-    # Dummy exporter, return True for success
-    def fake_export(*args, **kwargs):
-        called['export'] = True
-        return True
+    report = apply_contract(run_context, 'df_orders')
 
-    monkeypatch.setattr(module_contract, 'export_file', fake_export)
-    module_contract.apply_contract('df_orders', 'train')
+    assert report['status'] == 'failed'
+    assert 'Primary key violation' in report['errors'][0]
+    
+    
+def test_apply_contract_missing_required_timestamp(tmp_path):
 
-    # Contract application completed
-    assert called['export'] is True
+    raw_dir = tmp_path / 'raw'
+    raw_dir.mkdir()
 
-# ------------------------------------------------------------
-# MAIN EXECUTION (USER INPUT)
-# ------------------------------------------------------------
+    df = pd.DataFrame({
+        'order_id': [1],
+        # Missing required timestamp columns
+    })
 
-def test_main_executes_apply_contract(monkeypatch):
+    df.to_csv(raw_dir / 'df_orders_2026_01.csv', index=False)
 
-    called = {'run': False}
+    run_context = RunContext.create(base_path=tmp_path)
+    run_context.initialize_directories()
 
-    # Dummy contract application, return True if executed
-    def fake_apply(table_name, partition):
-        called['run'] = True
+    copytree(raw_dir, run_context.raw_snapshot_path, dirs_exist_ok=True)
 
-    monkeypatch.setattr(module_contract, 'apply_contract', fake_apply)
+    report = apply_contract(run_context, 'df_orders')
 
-    monkeypatch.setattr(
-        'sys.argv',
-        ['script', '--table', 'df_orders', '--partition', 'train']
-    )
-
-    module_contract.main()
-
-    # Script executed
-    assert called['run'] is True
+    assert report['status'] == 'failed'
+    assert 'Missing required timestamp' in report['errors'][0]
+    
 
 
 # =============================================================================
