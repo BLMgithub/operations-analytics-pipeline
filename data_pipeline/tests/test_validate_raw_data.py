@@ -32,6 +32,8 @@ def empty_report():
 def valid_orders_df():
     return pd.DataFrame({
         'order_id': ['o1', 'o2'],
+        'customer_id': ['customer1', 'customer2'],
+        'order_status': ['success', 'fail'],
         'order_purchase_timestamp': ['2023-01-01', '2023-01-02'],
         'order_approved_at': ['2023-01-01', '2023-01-02'],
         'order_delivered_timestamp': ['2023-01-03', '2023-01-04'],
@@ -42,32 +44,42 @@ def valid_orders_df():
 @pytest.fixture
 def valid_transaction_df():
     return pd.DataFrame({
-        'order_id': ['o1', 'o2'],
-        'payment_sequential': [1, 1],
-        'payment_value': [100.0, 50.0]
+            'order_id': ['o1', 'o2'],
+            'payment_sequential': [1, 1],
+            'payment_type': ['credit', 'credit'],
+            'payment_installments': [1, 2],
+            'payment_value': [123.4, 56.78]
     })
 
 
 @pytest.fixture
 def valid_order_items_df():
     return pd.DataFrame({
-        'order_id': ['o1'],
-        'product_id': ['prod_x'],
-        'seller_id': ['seller_x']
+        'order_id': ['o1', 'o2'],
+        'product_id': ['prod1', 'prod2'],
+        'seller_id': ['seller1', 'seller2'],
+        'price': [12.3, 45.6],
+        'shipping_charges': [1.23, 45.6]
     })
 
 @pytest.fixture
 def valid_customers_df():    
     return pd.DataFrame({
-        'customer_id': ['o1'],
-        'customer_zip': [12345]
+        'customer_id': [1, 2],
+        'customer_zip_code_prefix': ['zip1', 'zip2',],
+        'customer_city': ['city1', 'city2'],
+        'customer_state': ['state1', 'state2']
     })
     
 @pytest.fixture
 def valid_products_df():
     return pd.DataFrame({
-        'product_id': ['o1'],
-        'category_name': ['category1']
+        'product_id': ['prod1', 'prod2'],
+        'product_category_name': ['categ1', 'categ2'],
+        'product_weight_g': [491, 500],
+        'product_length_cm': [19.0, 20.0],
+        'product_height_cm': [12.0, 13.0],
+        'product_width_cm': [16.0, 15.0]
     })
 
 # ------------------------------------------------------------
@@ -103,7 +115,7 @@ def test_log_info_appends_only_to_info(empty_report):
 
 def test_base_validation_fails_on_empty_df(empty_report):
     df = pd.DataFrame()
-    ok = run_base_validations(df, 'df_test', ['id'], empty_report)
+    ok = run_base_validations(df, 'df_test', ['id'], ['col'], empty_report)
 
     assert ok is False
     assert len(empty_report['errors']) == 1
@@ -111,7 +123,7 @@ def test_base_validation_fails_on_empty_df(empty_report):
 
 def test_base_validation_fails_on_missing_pk(empty_report):
     df = pd.DataFrame({'x': [1, 2]})
-    ok = run_base_validations(df, 'df_test', ['id'], empty_report)
+    ok = run_base_validations(df, 'df_test', ['id'], ['x'], empty_report)
 
     assert ok is False
     assert len(empty_report['errors']) == 1
@@ -119,11 +131,21 @@ def test_base_validation_fails_on_missing_pk(empty_report):
 
 def test_base_validation_passes_with_non_fatal_issues(empty_report):
     df = pd.DataFrame({
-        'id': ['a', 'a'],
-        'value': [1, 2]
+        'customer_id': [1, None],
+        'customer_zip_code_prefix': ['zip1',  'zip3'],
+        'customer_city': ['city1',  'city3'],
+        'customer_state': ['state1',  'state3']
     })
 
-    ok = run_base_validations(df, 'df_test', ['id'], empty_report)
+    ok = run_base_validations(
+        df, 'df_customers', 
+        ['customer_id'],
+        ['customer_id',
+         'customer_zip_code_prefix',
+         'customer_city',
+         'customer_state'], 
+        empty_report
+    )
 
     assert ok is True
     assert len(empty_report['warnings']) > 0
@@ -205,13 +227,13 @@ def test_cross_table_validation_passes(valid_orders_df, valid_transaction_df, em
     assert ok is True
 
 
-def test_cross_table_fails_on_missing_table(empty_report):
+def test_cross_table_logs_on_missing_table(empty_report):
     tables = {}
 
     ok = run_cross_table_validations(tables, empty_report)
 
     assert ok is False
-    assert len(empty_report['errors']) == 1
+    assert len(empty_report['info']) == 1
 
 
 # ------------------------------------------------------------
