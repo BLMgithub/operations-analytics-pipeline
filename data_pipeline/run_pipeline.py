@@ -7,73 +7,78 @@ from shutil import copytree
 import sys
 import json
 
+from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.stages.validate_raw_data import apply_validation
 from data_pipeline.stages.apply_raw_data_contract import apply_contract
-from data_pipeline.stages.apply_raw_data_contract import TABLE_CONFIG
+
 
 def snapshot_raw(run_context: RunContext) -> None:
     """
     Copy entire raw source into run-scoped raw_snapshot directory.
     """
-    
+
     source = run_context.source_raw_path
     destination = run_context.raw_snapshot_path
-    
+
     if not source.exists():
-        raise FileNotFoundError(f'Raw source path not found: {source}')
-    
-    copytree(source, destination, dirs_exist_ok= True)
-    
-    
+        raise FileNotFoundError(f"Raw source path not found: {source}")
+
+    copytree(source, destination, dirs_exist_ok=True)
+
+
 def persist_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents= True, exist_ok= True)
-    with open(path,'w') as f:
-        json.dump(payload, f, indent= 2)
-    
-    
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
 def main() -> None:
     run_context = RunContext.create()
     run_context.initialize_directories()
-    
+
     # Create raw snapshot at runtime
     snapshot_raw(run_context)
-    
+
     # Initial validation
     validation_1 = apply_validation(run_context)
-    
-    persist_json(run_context.logs_path / 'validation_1.json', validation_1)
-    
-    # If validation passed continue to assembly
-    if not (validation_1['errors'] or validation_1['warnings']):
-        sys.exit(0)
-        
+
+    persist_json(run_context.logs_path / "validation_1.json", validation_1)
+
+    # Early exit for structural errors else apply contract
+    if validation_1["errors"]:
+        sys.exit(1)
+
     contract_reports = []
-    
+    invalid_order_ids = set()
+
     for table_name in TABLE_CONFIG:
-        result = apply_contract(run_context, table_name)
-        contract_reports.append(result)
+
+        report, new_invalid_ids = apply_contract(
+            run_context, table_name, invalid_order_ids
+        )
+
+        invalid_order_ids |= new_invalid_ids
+        contract_reports.append(report)
 
     persist_json(
-        run_context.logs_path / 'contract_report.json',
-        {
-            'run_id': run_context.run_id,
-            'tables': contract_reports
-        }
+        run_context.logs_path / "contract_report.json",
+        {"run_id": run_context.run_id, "tables": contract_reports},
     )
-    
+
     # Second validation on CONTRACTED data
-    validation_2 = apply_validation(run_context, base_path= run_context.contracted_path)
-    
-    persist_json(run_context.logs_path / 'validation_2.json', validation_2)
-    
-    # Intervention: Either manual fixing or escalate the data to source owner 
-    if validation_2['errors'] or validation_2['warnings']:
+    validation_2 = apply_validation(run_context, base_path=run_context.contracted_path)
+
+    persist_json(run_context.logs_path / "validation_2.json", validation_2)
+
+    # Intervention: Either manual fixing or escalate the data to source owner
+    if validation_2["errors"] or validation_2["warnings"]:
         sys.exit(1)
-    
+
     sys.exit(0)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
 
 # =============================================================================
