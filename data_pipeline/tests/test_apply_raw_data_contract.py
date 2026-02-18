@@ -25,10 +25,22 @@ def valid_orders_df():
     return pd.DataFrame(
         {
             "order_id": ["o1", "o2"],
-            "order_purchase_timestamp": ["2023-01-01", "2023-01-02"],
-            "order_approved_at": ["2023-01-01", "2023-01-02"],
-            "order_delivered_timestamp": ["2023-01-03", "2023-01-04"],
-            "order_estimated_delivery_date": ["2023-01-05", "2023-01-06"],
+            "order_purchase_timestamp": [
+                "2023-01-01 10:00:00",
+                "2023-01-02 11:00:00",
+            ],
+            "order_approved_at": [
+                "2023-01-01 10:05:00",
+                "2023-01-02 11:10:00",
+            ],
+            "order_delivered_timestamp": [
+                "2023-01-03 09:00:00",
+                "2023-01-04 08:30:00",
+            ],
+            "order_estimated_delivery_date": [
+                "2023-01-05",
+                "2023-01-06",
+            ],
         }
     )
 
@@ -38,10 +50,22 @@ def invalid_order_df():
     return pd.DataFrame(
         {
             "order_id": ["o1", "o2"],
-            "order_purchase_timestamp": ["2023-01-02", "invalid"],
-            "order_approved_at": ["2023-01-01", "invalid"],
-            "order_delivered_timestamp": ["2023-01-03", "2023-01-04"],
-            "order_estimated_delivery_date": ["2023-01-05", "2023-01-06"],
+            "order_purchase_timestamp": [
+                "2023-01-02 10:00:00",
+                "invalid",
+            ],
+            "order_approved_at": [
+                "2023-01-02 10:05:00",
+                "invalid",
+            ],
+            "order_delivered_timestamp": [
+                "2023-01-03 09:00:00",
+                "2023-01-04 08:30:00",
+            ],
+            "order_estimated_delivery_date": [
+                "2023-01-05",
+                "2023-01-06",
+            ],
         }
     )
 
@@ -51,10 +75,22 @@ def invalid_temporal_order_df():
     return pd.DataFrame(
         {
             "order_id": ["o1", "o2"],
-            "order_purchase_timestamp": ["2023-01-01", "2023-01-02"],
-            "order_approved_at": ["2022-01-01", "2023-01-02"],
-            "order_delivered_timestamp": ["2023-01-03", "2023-01-04"],
-            "order_estimated_delivery_date": ["2023-01-05", "2023-01-06"],
+            "order_purchase_timestamp": [
+                "2023-01-01 10:00:00",
+                "2023-01-02 11:00:00",
+            ],
+            "order_approved_at": [
+                "2022-12-31 10:00:00",  # earlier than purchase
+                "2023-01-02 11:10:00",
+            ],
+            "order_delivered_timestamp": [
+                "2023-01-03 09:00:00",
+                "2023-01-04 08:30:00",
+            ],
+            "order_estimated_delivery_date": [
+                "2023-01-05",
+                "2023-01-06",
+            ],
         }
     )
 
@@ -152,22 +188,22 @@ def test_apply_contract_event_fact_success(tmp_path):
         {
             "order_id": [1, 2, 3, 4],
             "order_purchase_timestamp": [
-                "2026-01-01",
-                "2026-01-01",  # duplicate
+                "2026-01-01 10:25:15",
+                "2026-01-01 10:25:15",  # duplicate
                 "bad_timestamp",  # unparsable
-                "2026-01-03",
+                "2026-01-03 11:30:05",
             ],
             "order_approved_at": [
-                "2026-01-01",
-                "2026-01-01",
-                "2026-01-02",
-                "2025-12-01",  # impossible (before purchase)
+                "2026-01-01 10:30:35",
+                "2026-01-01 10:30:35",
+                "2026-01-02 09:18:13",
+                "2025-12-01 05:24:11",  # impossible (before purchase)
             ],
             "order_delivered_timestamp": [
-                "2026-01-05",
-                "2026-01-05",
-                "2026-01-06",
-                "2026-01-02",
+                "2026-01-05 15:10:03",
+                "2026-01-05 15:10:03",
+                "2026-01-06 02:00:01",
+                "2026-01-02 03:59:02",
             ],
             "order_estimated_delivery_date": [
                 "2026-01-06",
@@ -280,12 +316,24 @@ def test_apply_contract_cascade_drop_with_order_id(tmp_path):
             "order_id": ["o1", "o2", "o3"],
             "order_purchase_timestamp": [
                 "invalid",  # unparsable
-                "2023-01-02",
-                "2023-01-03",
+                "2023-01-02 05:29:05",
+                "2023-01-03 03:01:10",
             ],
-            "order_approved_at": ["2023-01-01", "2023-01-02", "2023-01-03"],
-            "order_delivered_timestamp": ["2023-01-01", "2023-01-04", "2023-01-05"],
-            "order_estimated_delivery_date": ["2023-01-01", "2023-01-06", "2023-01-07"],
+            "order_approved_at": [
+                "2023-01-02 06:50:35",
+                "2023-01-03 20:25:09",
+                "2023-01-03 15:39:55",
+            ],
+            "order_delivered_timestamp": [
+                "2023-01-05 10:12:13",
+                "2023-01-04 05:06:07",
+                "2023-01-05 11:12:13",
+            ],
+            "order_estimated_delivery_date": [
+                "2023-01-04",
+                "2023-01-06",
+                "2023-01-07",
+            ],
         }
     )
     df_payments = pd.DataFrame(

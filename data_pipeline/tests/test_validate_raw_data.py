@@ -37,9 +37,9 @@ def valid_orders_df():
             "order_id": ["o1", "o2"],
             "customer_id": ["customer1", "customer2"],
             "order_status": ["success", "fail"],
-            "order_purchase_timestamp": ["2023-01-01", "2023-01-02"],
-            "order_approved_at": ["2023-01-01", "2023-01-02"],
-            "order_delivered_timestamp": ["2023-01-03", "2023-01-04"],
+            "order_purchase_timestamp": ["2023-01-01 01:05:10", "2023-01-02 05:25:30"],
+            "order_approved_at": ["2023-01-01 02:10:50", "2023-01-02 06:55:15"],
+            "order_delivered_timestamp": ["2023-01-03 10:15:20", "2023-01-04 10:25:35"],
             "order_estimated_delivery_date": ["2023-01-05", "2023-01-06"],
         }
     )
@@ -328,7 +328,10 @@ def test_event_fact_fails_on_missing_timestamp(valid_orders_df, empty_report):
 def test_event_fact_logs_warning_on_invalid_temporal_order(
     valid_orders_df, empty_report
 ):
-    valid_orders_df["order_approved_at"] = ["2022-12-01", "2022-12-01"]
+    valid_orders_df["order_approved_at"] = [
+        "2022-12-01 10:05:20",
+        "2022-12-01 09:10:11",
+    ]
 
     ok = run_event_fact_validations(valid_orders_df, "df_orders", empty_report)
 
