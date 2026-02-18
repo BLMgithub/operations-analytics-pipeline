@@ -220,7 +220,7 @@ def run_transaction_detail_validations(
     for col in numeric_columns:
         negative_count = (df[col] < 0).sum()
         if negative_count > 0:
-            log_warning(
+            log_error(
                 f"{table_name}: {negative_count} negative value(s) in numeric column `{col}`",
                 report,
             )

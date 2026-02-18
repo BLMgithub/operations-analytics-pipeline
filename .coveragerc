@@ -2,3 +2,4 @@
 omit =
     data_pipeline/prototypes/*
     data_pipeline/shared/table_configs.py
+    */__init__.py
