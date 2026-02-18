@@ -61,3 +61,23 @@ TABLE_CONFIG = {
         ],
     },
 }
+
+
+# ------------------------------------------------------------
+# CONFIGURATIONS FOR apply_raw_data_contract.py
+# ------------------------------------------------------------
+
+REQUIRED_TIMESTAMPS = [
+    "order_purchase_timestamp",
+    "order_approved_at",
+    "order_delivered_timestamp",
+    "order_estimated_delivery_date",
+]
+
+
+TIMESTAMP_FORMATS = {
+    "order_purchase_timestamp": "%Y-%m-%d %H:%M:%S",
+    "order_approved_at": "%Y-%m-%d %H:%M:%S",
+    "order_delivered_timestamp": "%Y-%m-%d %H:%M:%S",
+    "order_estimated_delivery_date": "%Y-%m-%d",
+}

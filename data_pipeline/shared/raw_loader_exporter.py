@@ -4,7 +4,7 @@
 
 from pathlib import Path
 import pandas as pd
-from typing import Optional, Callable, Literal
+from typing import Optional, Callable
 
 
 def load_csv_file(path: Path) -> pd.DataFrame:

@@ -6,12 +6,14 @@
 # - Designed for deterministic execution in CI/CD pipelines
 
 
-import os
-import sys
 from typing import Dict, List
 import pandas as pd
 from data_pipeline.shared.raw_loader_exporter import load_logical_table
-from data_pipeline.shared.table_configs import TABLE_CONFIG
+from data_pipeline.shared.table_configs import (
+    TABLE_CONFIG,
+    REQUIRED_TIMESTAMPS,
+    TIMESTAMP_FORMATS,
+)
 from data_pipeline.shared.run_context import RunContext
 from pathlib import Path
 
@@ -149,14 +151,7 @@ def run_event_fact_validations(
     Stops if timeline integrity is broken.
     """
 
-    required_timestamps = [
-        "order_purchase_timestamp",
-        "order_approved_at",
-        "order_delivered_timestamp",
-        "order_estimated_delivery_date",
-    ]
-
-    missing_ts_columns = [c for c in required_timestamps if c not in df.columns]
+    missing_ts_columns = [c for c in REQUIRED_TIMESTAMPS if c not in df.columns]
     if missing_ts_columns:
         log_error(
             f"{table_name}: missing required timestamp column(s): {missing_ts_columns}",
@@ -168,8 +163,12 @@ def run_event_fact_validations(
     # Timestamps completeness
     parsed = {}
 
-    for col in required_timestamps:
-        ts = pd.to_datetime(df[col], errors="coerce")
+    for col in REQUIRED_TIMESTAMPS:
+        ts = pd.to_datetime(
+            df[col],
+            format=TIMESTAMP_FORMATS[col],
+            errors="coerce",
+        )
         parsed[col] = ts
 
         invalid_count = ts.isna().sum()

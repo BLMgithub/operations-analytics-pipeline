@@ -4,14 +4,21 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from datetime import datetime
 import uuid
+
+
+def _generate_run_id() -> str:
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    random_suffix = uuid.uuid4().hex[:6]
+    return f"{timestamp}_{random_suffix}"
 
 
 @dataclass
 class RunContext:
     run_id: str
-    base_path: Path
+    base_path: str | Path
 
     # root & source
     run_path: Path
@@ -33,17 +40,17 @@ class RunContext:
     @classmethod
     def create(
         cls,
-        base_path: str = "data",
+        base_path: str | Path = "data",
         source_raw_subpath: str = "raw",
         run_id: str | None = None,
+        run_id_factory: Callable[[], str] | None = None,
     ) -> "RunContext":
 
         base = Path(base_path)
 
         if run_id is None:
-            timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-            random_suffix = uuid.uuid4().hex[:6]
-            run_id = f"{timestamp}_{random_suffix}"
+            generator = run_id_factory or _generate_run_id
+            run_id = generator()
 
         run_path = base / "runs" / run_id
         source_raw_path = base / source_raw_subpath

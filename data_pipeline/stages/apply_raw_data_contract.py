@@ -7,22 +7,13 @@
 
 
 import pandas as pd
-from typing import List
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
-from data_pipeline.shared.table_configs import TABLE_CONFIG
+from data_pipeline.shared.table_configs import (
+    TABLE_CONFIG,
+    REQUIRED_TIMESTAMPS,
+    TIMESTAMP_FORMATS,
+)
 from data_pipeline.shared.run_context import RunContext
-from pathlib import Path
-
-# ------------------------------------------------------------
-# CONFIGURATIONS
-# ------------------------------------------------------------
-
-REQUIRED_TIMESTAMPS = [
-    "order_purchase_timestamp",
-    "order_approved_at",
-    "order_delivered_timestamp",
-    "order_estimated_delivery_date",
-]
 
 
 # ------------------------------------------------------------
@@ -35,13 +26,13 @@ def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     Remove exact duplicate rows representing the same event.
     """
 
-    initial_count = df.shape[0]
+    initial_count = len(df)
     duplicated_mask = df.duplicated()
 
     if duplicated_mask.any():
 
         df = df.drop_duplicates()
-        removed_count = initial_count - df.shape[0]
+        removed_count = initial_count - len(df)
 
     else:
         removed_count = 0
@@ -54,11 +45,15 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
     Remove rows where required timestamps cannot be parsed.
     """
 
-    initial_count = df.shape[0]
+    initial_count = len(df)
     unparsable_mask = pd.Series(False, index=df.index)
 
     for col in REQUIRED_TIMESTAMPS:
-        ts = pd.to_datetime(df[col], errors="coerce")
+        ts = pd.to_datetime(
+            df[col],
+            format=TIMESTAMP_FORMATS[col],
+            errors="coerce",
+        )
 
         # accumulate True for every NaT
         unparsable_mask |= ts.isna()
@@ -69,7 +64,7 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
         invalid_order_ids = set(df.loc[unparsable_mask, "order_id"])
 
         df = df[~unparsable_mask]
-        remove_count = initial_count - df.shape[0]
+        remove_count = initial_count - len(df)
 
     else:
         remove_count = 0
@@ -87,7 +82,7 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
     delivered_ts = pd.to_datetime(df["order_delivered_timestamp"])
 
     invalid_mask = (approved_ts < purchase_ts) | (delivered_ts < purchase_ts)
-    initial_count = df.shape[0]
+    initial_count = len(df)
 
     invalid_order_ids = set()
     if invalid_mask.any():
@@ -95,7 +90,7 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
         invalid_order_ids = set(df.loc[invalid_mask, "order_id"])
 
         df = df[~invalid_mask]
-        remove_count = initial_count - df.shape[0]
+        remove_count = initial_count - len(df)
 
     else:
         remove_count = 0
@@ -110,10 +105,10 @@ def cascade_drop_by_order_id(
     Remove rows that contains invalid parent primary key (drop from previous enforcement)
     """
 
-    initial_count = df.shape[0]
+    initial_count = len(df)
 
     df = df[~df["order_id"].isin(invalid_order_ids)]
-    removed = initial_count - df.shape[0]
+    removed = initial_count - len(df)
 
     return df, removed
 

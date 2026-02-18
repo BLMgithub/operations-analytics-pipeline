@@ -27,6 +27,12 @@ jobs:
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
+      - name: Check formatting
+        run: black --check .
+
+      - name: Lint with ruff
+        run: ruff check .
+
       - name: Run tests with coverage enforcement
         run: |
           pytest \

@@ -1,5 +1,4 @@
 [run]
 omit =
     data_pipeline/prototypes/*
-    data_pipeline/shared/*
-    data_pipeline/run_pipeline.py
+    data_pipeline/shared/table_configs.py
