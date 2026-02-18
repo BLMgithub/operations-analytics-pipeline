@@ -6,8 +6,6 @@
 # - Designed for deterministic execution in CI/CD pipelines
 
 
-import os
-import sys
 from typing import Dict, List
 import pandas as pd
 from data_pipeline.shared.raw_loader_exporter import load_logical_table

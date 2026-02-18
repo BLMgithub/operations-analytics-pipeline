@@ -1,0 +1,9 @@
+[tool.black]
+line-length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["data_pipeline/tests"]
+
+[tool.ruff]
+ignore = ["E501"]
+select = ["F", "A", "B", "SIM"]

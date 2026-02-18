@@ -7,11 +7,9 @@
 
 
 import pandas as pd
-from typing import List
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
-from pathlib import Path
 
 # ------------------------------------------------------------
 # CONFIGURATIONS
