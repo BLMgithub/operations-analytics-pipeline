@@ -1,85 +1,160 @@
-# Raw Data Validation — CI Gate
+# Raw Data Validation Gate
+
+**Related Script/Stage:** [`validate_raw_data.py`](../data_pipeline/stages/validate_raw_data.py)
+
+## Component Role
+
+Deterministic structural and semantic validation engine.
+
+Executed by [`run_pipeline.py`](../data_pipeline/run_pipeline.py) at multiple pipeline checkpoints.
+
+This module evaluates admissibility of logical tables against defined schema and integrity rules.  
+It never mutates data and never decides stage progression.
 
 ## Purpose
 
-Enforce **structural and semantic integrity** of raw fulfillment data before any merge, aggregation, or BI ingestion.
+Ensure logical tables conform to:
 
-This script is a **hard CI/CD gate**.  
-If it fails, the pipeline stops.
+- Declared schema contract [(`TABLE_CONFIG`)](../data_pipeline/shared/table_configs.py)
+- Primary key integrity
+- Timestamp semantics
+- Referential integrity across tables
 
-Passing means the data is **structurally usable**, not analytically correct.
+Protect downstream joins, aggregations, and timeline logic from corruption.
 
-## Scope
+## Inputs
 
-Validates raw CSV data in: `data/raw/train/`
+- [`RunContext`](../data_pipeline/shared/run_context.py)
+- Snapshot base path (raw or contracted)
+- [`TABLE_CONFIG`](../data_pipeline/shared/table_configs.py)
+  - primary keys
+  - allowed columns
+  - role definition
+- [`REQUIRED_TIMESTAMPS`](../data_pipeline/shared/table_configs.py)
+- [`TIMESTAMP_FORMATS`](../data_pipeline/shared/table_configs.py)
 
-All files belonging to the same logical table are loaded via **filename prefix** (e.g. `df_Orders*.csv`) and validated as a single dataset.
 
-This script does **not**:
-- clean or modify data
-- filter records
-- apply thresholds
-- encode business logic
-- produce output files
+## Outputs
 
-## Validation Layers
+Structured validation report:
 
-### Base Validations (All Tables)
-**CI-blocking**
-- Empty dataset
-- Duplicate column names
-- Missing primary key columns
-- Null primary key values
-- Duplicated primary keys
+```
+"errors": List[str],
+"warnings": List[str],
+"info": List[str]
+```
 
-Guarantees identity and join safety.
+The module does not raise exceptions for data issues.  
+It returns severity-scoped signals for the orchestrator.
 
-### Event Fact Validations (`df_Orders`)
-**CI-blocking**
-- Missing required timestamps
-- Unparsable timestamps
-- Approval before purchase
-- Delivery before purchase
 
-Guarantees temporal correctness.
+## Validation Coverage
 
-### Transaction Detail Validations  (`df_OrderItems`, `df_payments`)
-**CI-blocking**
-- Negative numeric values
+### 1. Base Structural Validation (All Tables)
 
-Prevents corrupted aggregations.
+- Dataset not empty
+- Exact schema enforcement (no missing or extra columns)
+- Primary key presence
+- Conflicting duplicate primary keys (error)
+- Repairable duplicate rows (warning)
+- Null values in primary key (warning)
+- Duplicate column labels (warning)
 
-### Cross-Table Validations
-**CI-blocking**
-- Order items referencing missing orders
-- Payments referencing missing orders
-- Missing required parent tables
+Stops deeper validation for that logical table when structural integrity fails.
 
-Guarantees referential integrity.
 
-## Control Flow
+### 2. Role-Specific Validation
 
-- Validation functions detect and log errors
-- Local checks may stop early when further validation is invalid
-- CI outcome is decided **once**, at script end
+#### Event Fact Tables
 
-exit 0 → validation passed
-exit 1 → validation failed
+- Required timestamp columns present (error)
+- Unparsable timestamp values (warning)
+- Approval before purchase (warning)
+- Delivery before purchase (warning)
 
-Warnings and info logs do not affect CI outcome.
+Protects event timeline consistency.
+
+#### Transaction Detail Tables
+
+- Negative numeric values (error)
+
+Flags potential aggregation distortion.
+
+
+### 3. Cross-Table Validation
+
+Executed only when required tables are successfully loaded
+
+- Orphan `order_id` in `df_order_items` (warning)
+- Orphan `order_id` in `df_payments` (warning)
+
+Protects parent-child attachment semantics.
+
+
+## Invariants
+
+- No data mutation
+- No schema correction
+- No deduplication
+- No record deletion
+- No repair logic
+- Deterministic output for identical inputs
+
+## Stage Execution Context
+
+This engine is reused at multiple pipeline stages.
+
+Severity interpretation is controlled by the orchestrator:
+
+Pre-contract validation:
+- Halt on ERROR
+- Allow WARNING
+
+Post-contract validation:
+- Halt on ERROR
+- Halt on WARNING
+
+The validator produces truth.
+The orchestrator defines tolerance.
+
+## Failure Semantics
+
+The presence of:
+
+- `errors` → structural or integrity break
+- `warnings` → data quality anomaly
+- `info` → non-blocking execution note
+
+The module itself does not decide pipeline continuation.
+
 
 ## Design Principles
 
-- Fail fast only when continuation is unsafe
-- Accumulate errors when diagnostics remain meaningful
-- Enforce structure, not judgment
-- Validation ≠ preparation ≠ analytics
+- Contract-driven schema enforcement
+- Fail-fast on structural break
+- Explicit referential integrity checks
+- CI/CD compatible
+- Stage-agnostic severity signaling
+- Deterministic validation behavior under fixed input and configuration
 
-## Downstream Contract
+## Dependency Boundary
 
-Only data that passes this script may be used by:
-1. Merge / enrichment pipeline
-2. Fact table derivation
-3. BI ingestion
+Relies on:
 
-This script defines the **raw data contract** for the pipeline.
+- `raw_loader_exporter.py` for table loading
+- `TABLE_CONFIG` for schema contract
+- Timestamp configuration definitions
+- `run_pipeline.py` for gating logic
+
+## Change Impact
+
+Any modification to:
+
+- TABLE_CONFIG
+- Primary keys
+- Timestamp requirements
+- Severity behavior
+
+Must be evaluated against both pre-contract and post-contract execution stages.
+
+This component defines structural admissibility across the pipeline.

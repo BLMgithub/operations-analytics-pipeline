@@ -15,7 +15,8 @@ from data_pipeline.stages.apply_raw_data_contract import apply_contract
 
 def snapshot_raw(run_context: RunContext) -> None:
     """
-    Copy entire raw source into run-scoped raw_snapshot directory.
+    Creates a run-scoped raw snapshot by copying the entire source raw
+    directory into the run context.
     """
 
     source = run_context.source_raw_path
@@ -28,6 +29,9 @@ def snapshot_raw(run_context: RunContext) -> None:
 
 
 def persist_json(path: Path, payload: dict) -> None:
+    """
+    Writes the stage report to a JSON file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)
@@ -50,8 +54,12 @@ def main() -> None:
         sys.exit(1)
 
     contract_reports = []
+
+    # Accumulates invalid order_ids produced by parent (event_fact) tables and
+    # applies them to child (transaction_detail) tables during the same run for cascading.
     invalid_order_ids = set()
 
+    # TABLE_CONFIG order must list parent tables before their children.
     for table_name in TABLE_CONFIG:
 
         report, new_invalid_ids = apply_contract(

@@ -24,7 +24,6 @@ from pathlib import Path
 
 
 def init_report() -> Dict[str, List[str]]:
-
     return {"errors": [], "warnings": [], "info": []}
 
 
@@ -56,9 +55,23 @@ def run_base_validations(
     report: Dict[str, List[str]],
 ) -> bool:
     """
-    Base structural validations.
+    Baseline structural gate for all tables.
 
-    Stops if structure is broken.
+    Collects data quality findings and classifies severity:
+    - `errors` - dataset is structurally invalid; downstream validations should stop
+    - `warnings` - admissible data quality issues that may be repairable
+
+    **errors:**
+    - dataset is empty
+    - missing allowed column(s)
+    - unexpected extra column(s)
+    - missing primary key column(s)
+    - conflicting duplicate primary keys
+
+    **warnings:**
+    - duplicate columns
+    - null primary key values
+    - identical duplicates
     """
 
     if df.empty:
@@ -94,6 +107,9 @@ def run_base_validations(
     if duplicate_mask.any():
 
         duplicate_rows = df[duplicate_mask]
+
+        # Groups duplicate rows by primary key
+        # returns tuple (pk_value and group_df "duplicated rows")
         pk_group = duplicate_rows.groupby(primary_key, dropna=False)
 
         conflicting = False
@@ -101,8 +117,9 @@ def run_base_validations(
 
         for _, group in pk_group:
 
+            # PK group must collapse to 1 unique row
             if len(group.drop_duplicates()) == 1:
-                repairable_count += len(group) - 1
+                repairable_count += len(group) - 1  # Exclude 1st occurrence
 
             else:
                 conflicting = True
@@ -146,12 +163,22 @@ def run_event_fact_validations(
     df: pd.DataFrame, table_name: str, report: Dict[str, List[str]]
 ) -> bool:
     """
-    Event fact validations.
+    Event fact validation layer.
 
-    Stops if timeline integrity is broken.
+    Collects data quality findings and classifies severity:
+    - `errors` - dataset is structurally invalid; downstream validations should stop
+    - `warnings` - admissible data quality issues that may be repairable
+
+    **errors:**
+    - missing required timestamp column(s)
+
+    **warnings:**
+    - unparsable timestamp values in required timestamp fields
+    - approval timestamp earlier than purchase timestamp
+    - delivery timestamp earlier than purchase timestamp
     """
 
-    missing_ts_columns = [c for c in REQUIRED_TIMESTAMPS if c not in df.columns]
+    missing_ts_columns = [col for col in REQUIRED_TIMESTAMPS if col not in df.columns]
     if missing_ts_columns:
         log_error(
             f"{table_name}: missing required timestamp column(s): {missing_ts_columns}",
@@ -160,9 +187,9 @@ def run_event_fact_validations(
 
         return False
 
-    # Timestamps completeness
     parsed = {}
 
+    # Required timestamps column and format
     for col in REQUIRED_TIMESTAMPS:
         ts = pd.to_datetime(
             df[col],
@@ -182,7 +209,8 @@ def run_event_fact_validations(
     approved_ts = parsed["order_approved_at"]
     delivered_ts = parsed["order_delivered_timestamp"]
 
-    # Approval before Purchase
+    # Check for invalid temporal ordering such as:
+    # Approval before Purchase or Delivery before Purchase
     invalid_approval = (approved_ts < purchase_ts).sum()
     if invalid_approval > 0:
         log_warning(
@@ -190,7 +218,6 @@ def run_event_fact_validations(
             report,
         )
 
-    # Delivery before Purchase
     invalid_delivery = (delivered_ts < purchase_ts).sum()
     if invalid_delivery > 0:
         log_warning(
@@ -210,9 +237,12 @@ def run_transaction_detail_validations(
     df: pd.DataFrame, table_name: str, report: Dict[str, List[str]]
 ) -> bool:
     """
-    Transaction detail validations.
+    Transaction detail validation.
 
-    Stops if aggregations would be corrupted.
+    Collects error-level data quality findings.
+
+    **errors:**
+    - negative values in numeric columns
     """
 
     numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
@@ -220,7 +250,7 @@ def run_transaction_detail_validations(
     for col in numeric_columns:
         negative_count = (df[col] < 0).sum()
         if negative_count > 0:
-            log_warning(
+            log_error(
                 f"{table_name}: {negative_count} negative value(s) in numeric column `{col}`",
                 report,
             )
@@ -237,13 +267,22 @@ def run_cross_table_validations(
     tables: Dict[str, pd.DataFrame], report: Dict[str, List[str]]
 ) -> bool:
     """
-    Cross-table validations.
+    Cross-table integrity validation.
 
-    Stops if parent-child attachment semantics are broken.
+    Collects data quality findings and classifies severity:
+    - `warnings` - admissible referential integrity issues
+    - `info` - validation skipped due to missing required tables
+
+    **info:**
+    - validation skipped when required tables are unavailable
+
+    **warnings:**
+    - order items referencing non-existent order_id
+    - payments referencing non-existent order_id
     """
 
     required_tables = ["df_orders", "df_order_items", "df_payments"]
-    missing_tables = [t for t in required_tables if t not in tables]
+    missing_tables = [tbl for tbl in required_tables if tbl not in tables]
 
     if missing_tables:
         log_info(
@@ -285,6 +324,25 @@ def run_cross_table_validations(
 
 
 def apply_validation(run_context: RunContext, base_path: Path | None = None) -> Dict:
+    """
+    Coordinates table loading and layered validations, aggregating all findings
+    into a single report for the main pipeline controller.
+
+    Chronological behavior:
+
+    - Initializes the validation report and logging helpers.
+    - Loads each configured logical table from the snapshot.
+    - Runs the baseline structural gate per table:
+    - Tables that fail the base gate are excluded from downstream validators.
+    - Dispatches role-specific validators based on table role.
+    - Emits an error when expected tables are missing.
+    - Executes cross-table integrity checks on successfully loaded tables.
+
+    Notes:
+
+    - This function does not terminate the pipeline.
+    - Final pass/fail handling is delegated to the main orchestrator via the report.
+    """
 
     if base_path is None:
         base_path = run_context.raw_snapshot_path
@@ -300,7 +358,7 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     tables: Dict[str, pd.DataFrame] = {}
     loaded_table_names = set()
 
-    # Get assigned table attributes
+    # Get assigned table configs
     for table_name, config in TABLE_CONFIG.items():
 
         df = load_logical_table(base_path, table_name, log_info=info, log_error=error)

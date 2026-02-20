@@ -363,10 +363,10 @@ def test_transaction_detail_fails_on_negative_value(empty_report):
     ok = run_transaction_detail_validations(df, "df_payments", empty_report)
 
     assert ok is True
-    assert len(empty_report["warnings"]) == 1
+    assert len(empty_report["errors"]) == 1
     assert any(
-        "df_payments: 1 negative value(s) in numeric column `payment_value`" in warning
-        for warning in empty_report["warnings"]
+        "df_payments: 1 negative value(s) in numeric column `payment_value`" in error
+        for error in empty_report["errors"]
     )
 
 

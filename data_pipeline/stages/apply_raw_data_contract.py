@@ -23,7 +23,10 @@ from data_pipeline.shared.run_context import RunContext
 
 def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """
-    Remove exact duplicate rows representing the same event.
+    Exact event deduplication.
+
+    Removes fully identical rows representing the same logical event and <br>
+    returns the cleaned dataframe along with the number of rows removed.
     """
 
     initial_count = len(df)
@@ -42,7 +45,11 @@ def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 
 def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, set]:
     """
-    Remove rows where required timestamps cannot be parsed.
+    Timestamp parse enforcement.
+
+    Removes rows where any required timestamp field cannot be parsed under
+    the declared formats. <br>
+    Also returns the affected `order_ids` to support downstream cascade cleanup.
     """
 
     initial_count = len(df)
@@ -74,7 +81,11 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
 
 def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, set]:
     """
-    Remove rows violating declared temporal invariants (e.g. delivery_date < order_date)
+    Temporal invariant enforcement.
+
+    Removes rows that violate required chronological ordering between
+    purchase, approval, and delivery timestamps. <br>
+    Also returns the affected `order_ids` for downstream cascade cleanup.
     """
 
     purchase_ts = pd.to_datetime(df["order_purchase_timestamp"])
@@ -102,7 +113,10 @@ def cascade_drop_by_order_id(
     df: pd.DataFrame, invalid_order_ids: set
 ) -> tuple[pd.DataFrame, int]:
     """
-    Remove rows that contains invalid parent primary key (drop from previous enforcement)
+    Referential cleanup by `order_id`.
+
+    Removes rows whose `order_id` was previously invalidated by
+    upstream contract enforcement steps.
     """
 
     initial_count = len(df)
@@ -121,6 +135,28 @@ def cascade_drop_by_order_id(
 def apply_contract(
     run_context: RunContext, table_name: str, invalid_order_ids: set | None = None
 ) -> tuple[dict, set]:
+    """
+    Applies role-driven deterministic normalization, producing a cleaned
+    dataset and a structured execution report.
+
+    Chronological behavior:
+    - Initializes contract metrics and error container.
+    - Validates table eligibility against TABLE_CONFIG.
+    - Loads the logical table from the raw snapshot.
+    - Applies role-specific contract steps:
+        - **event_fact:**
+            - exact deduplication
+            - timestamp parse enforcement
+            - temporal invariant enforcement (produces invalid `order_ids`)
+        - **transaction_detail:**
+            - exact deduplication
+            - optional cascade removal using upstream invalid `order_ids`
+        - **entity_reference:**
+            - exact deduplication only.
+    - Records row-level impact for each enforcement step.
+    - Writes the contracted output to the contract layer.
+    - Returns the execution report and any newly invalidated `order_ids`.
+    """
 
     report = {
         "table": table_name,
