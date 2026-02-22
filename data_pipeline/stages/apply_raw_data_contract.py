@@ -168,6 +168,7 @@ def apply_contract(
         "removed_impossible_timestamps": 0,
         "status": "success",
         "errors": [],
+        "info": [],
     }
 
     invalid_ids = set()

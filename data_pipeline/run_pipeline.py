@@ -11,6 +11,7 @@ from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.stages.validate_raw_data import apply_validation
 from data_pipeline.stages.apply_raw_data_contract import apply_contract
+from data_pipeline.stages.assemble_validated_events import assemble_events
 
 
 def snapshot_raw(run_context: RunContext) -> None:
@@ -44,16 +45,25 @@ def main() -> None:
     # Create raw snapshot at runtime
     snapshot_raw(run_context)
 
+    report_validation_1 = []
+
     # Initial validation
     validation_1 = apply_validation(run_context)
+    report_validation_1.append(validation_1)
 
-    persist_json(run_context.logs_path / "validation_1.json", validation_1)
+    persist_json(
+        run_context.logs_path / "validation_1.json",
+        {
+            "run_id": run_context.run_id,
+            "report": report_validation_1,
+        },
+    )
 
     # Early exit for structural errors else apply contract
     if validation_1["errors"]:
         sys.exit(1)
 
-    contract_reports = []
+    report_contract = []
 
     # Accumulates invalid order_ids produced by parent (event_fact) tables and
     # applies them to child (transaction_detail) tables during the same run for cascading.
@@ -62,25 +72,60 @@ def main() -> None:
     # TABLE_CONFIG order must list parent tables before their children.
     for table_name in TABLE_CONFIG:
 
-        report, new_invalid_ids = apply_contract(
-            run_context, table_name, invalid_order_ids
+        contract, new_invalid_ids = apply_contract(
+            run_context,
+            table_name,
+            invalid_order_ids,
         )
 
         invalid_order_ids |= new_invalid_ids
-        contract_reports.append(report)
+        report_contract.append(contract)
 
     persist_json(
         run_context.logs_path / "contract_report.json",
-        {"run_id": run_context.run_id, "tables": contract_reports},
+        {
+            "run_id": run_context.run_id,
+            "report": report_contract,
+        },
     )
 
-    # Second validation on CONTRACTED data
-    validation_2 = apply_validation(run_context, base_path=run_context.contracted_path)
+    report_validation_2 = []
 
-    persist_json(run_context.logs_path / "validation_2.json", validation_2)
+    # Rerun validation on CONTRACTED data
+    validation_2 = apply_validation(
+        run_context,
+        base_path=run_context.contracted_path,
+    )
+
+    report_validation_2.append(validation_2)
+
+    persist_json(
+        run_context.logs_path / "validation_2.json",
+        {
+            "run_id": run_context.run_id,
+            "report": report_validation_2,
+        },
+    )
 
     # Intervention: Either manual fixing or escalate the data to source owner
     if validation_2["errors"] or validation_2["warnings"]:
+        sys.exit(1)
+
+    report_assemble = []
+
+    # Assemble event table
+    assemble = assemble_events(run_context)
+    report_assemble.append(assemble)
+
+    persist_json(
+        run_context.logs_path / "assemble_report.json",
+        {
+            "run_id": run_context.run_id,
+            "report": report_assemble,
+        },
+    )
+
+    if assemble["status"] == "failed":
         sys.exit(1)
 
     sys.exit(0)

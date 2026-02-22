@@ -67,12 +67,25 @@ def test_main_exits_on_validation_2_issues(monkeypatch, tmp_path):
             return {"errors": [], "warnings": []}  # force to pass on validation_1
         return {"errors": [], "warnings": ["warn"]}  # fail on validation_2
 
-    monkeypatch.setattr("data_pipeline.run_pipeline.apply_validation", fake_validation)
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_validation",
+        fake_validation,
+    )
+
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.apply_contract",
         lambda *a, **k: ({}, set()),
     )
-    monkeypatch.setattr("data_pipeline.run_pipeline.snapshot_raw", lambda *_: None)
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.assemble_events",
+        lambda *a, **k: {"status": "success", "error": [], "info": []},
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.snapshot_raw",
+        lambda *_: None,
+    )
 
     with pytest.raises(SystemExit) as e:
         main()
@@ -106,6 +119,11 @@ def test_main_success(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
+        "data_pipeline.run_pipeline.assemble_events",
+        lambda *a, **k: {"status": "success", "error": [], "info": []},
+    )
+
+    monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",
         lambda *_: None,
     )
@@ -117,6 +135,7 @@ def test_main_success(monkeypatch, tmp_path):
     assert (fake_ctx.logs_path / "validation_1.json").exists()
     assert (fake_ctx.logs_path / "contract_report.json").exists()
     assert (fake_ctx.logs_path / "validation_2.json").exists()
+    assert (fake_ctx.logs_path / "assemble_report.json").exists()
 
 
 # =============================================================================
