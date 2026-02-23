@@ -2,7 +2,7 @@
 line-length = 88
 
 [tool.pytest.ini_options]
-testpaths = ["data_pipeline/tests"]
+testpaths = ["tests"]
 
 [tool.ruff]
 ignore = ["E501"]
