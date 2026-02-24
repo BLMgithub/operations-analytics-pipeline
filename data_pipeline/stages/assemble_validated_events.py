@@ -59,6 +59,8 @@ def merge_data(tables: dict) -> pd.DataFrame:
         df_payments, on="order_id", how="left"
     )
 
+    df_merged = df_merged.rename(columns={"payment_value": "order_revenue"})
+
     if len(df_merged) != len(df_orders):
         raise RuntimeError("Cardinality violation detected: expected 1 row per order")
 
@@ -136,6 +138,7 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     ENFORCED_SCHEMA = [
         "order_id",
+        "order_revenue",
         "seller_id",
         "product_id",
         "order_status",
@@ -153,6 +156,7 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     ENFORCED_DTYPES = {
         "order_id": "string",
+        "order_revenue": "float64",
         "seller_id": "string",
         "product_id": "string",
         "order_status": "string",
