@@ -84,6 +84,7 @@ def valid_derived_df():
                 dtype="string",
             ),
             "seller_id": pd.Series(["seller1", "seller2"], dtype="string"),
+            "order_revenue": pd.Series([12.34, 56.78], dtype="float64"),
             "product_id": pd.Series(["prod1", "prod2"], dtype="string"),
             "order_status": pd.Series(["delivered", "cancelled"], dtype="string"),
             "order_purchase_timestamp": pd.Series(
@@ -243,6 +244,7 @@ def test_freeze_schema_enforces_strict_schema_success(valid_derived_df):
 
     expected_dtypes = {
         "order_id": "string",
+        "order_revenue": "float64",
         "seller_id": "string",
         "product_id": "string",
         "order_status": "string",
