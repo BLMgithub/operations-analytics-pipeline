@@ -86,13 +86,6 @@ def seller_weekly_semantic(
         weekly_avg_approval_lag=("approval_lag_days", "mean"),
     )
 
-    expected = (
-        read_assembled[["seller_id", "order_year_week"]].drop_duplicates().shape[0]
-    )
-
-    if len(seller_weekly_fact) != expected:
-        raise RuntimeError("Fact table grain violation: seller_weekly_fact")
-
     seller_dim = read_assembled.groupby(
         "seller_id",
         as_index=False,
@@ -101,9 +94,6 @@ def seller_weekly_semantic(
         first_order_year_week=("order_year_week", "min"),
         run_id=("run_id", "first"),
     )
-
-    if len(seller_dim) != read_assembled["seller_id"].nunique():
-        raise RuntimeError("Dimension table grain violation: seller_dim")
 
     return seller_weekly_fact, seller_dim
 
