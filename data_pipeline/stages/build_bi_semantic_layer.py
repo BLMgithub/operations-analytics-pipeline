@@ -271,7 +271,7 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
 
     seller_semantic_tables = {
         f"seller_week_performance_fact_{year}_{month}.parquet": seller_fact_contracted,
-        f"dim_seller_{year}_{month}.parquet": seller_dim_contracted,
+        f"seller_dim_{year}_{month}.parquet": seller_dim_contracted,
     }
 
     for table_name, table in seller_semantic_tables.items():

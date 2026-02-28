@@ -4,8 +4,10 @@
 
 from pathlib import Path
 from shutil import copytree
+from datetime import datetime as dt
 import sys
 import json
+
 
 from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
@@ -13,6 +15,12 @@ from data_pipeline.stages.validate_raw_data import apply_validation
 from data_pipeline.stages.apply_raw_data_contract import apply_contract
 from data_pipeline.stages.assemble_validated_events import assemble_events
 from data_pipeline.stages.build_bi_semantic_layer import build_semantic_layer
+from data_pipeline.stages.publish_lifecycle import run_integrity_gate
+
+
+# ------------------------------------------------------------
+# SUPPORTING UTILITIES
+# ------------------------------------------------------------
 
 
 def snapshot_raw(run_context: RunContext) -> None:
@@ -39,29 +47,100 @@ def persist_json(path: Path, payload: dict) -> None:
         json.dump(payload, f, indent=2)
 
 
+def initiliaze_metadata(run_context: RunContext) -> None:
+    """
+    Run metadata initializer.
+
+    Creates the run-scoped metadata record at pipeline start to
+    establish lifecycle tracking and publish eligibility state.
+    """
+
+    payload = {
+        "run_id": run_context.run_id,
+        "status": "RUNNING",
+        "started_at": dt.utcnow().isoformat(),
+        "completed_at": None,
+        "published": False,
+    }
+
+    persist_json(run_context.metadata_path, payload)
+
+
+def finalize_run(run_context: RunContext, status: str) -> None:
+    """
+    Run metadata finalizer.
+
+    Updates the run metadata record with terminal status and
+    completion timestamp.
+    """
+
+    if not run_context.metadata_path.exists():
+        raise RuntimeError("metadata.json missing during finalization")
+
+    with open(run_context.metadata_path, "r") as file:
+        payload = json.load(file)
+
+    payload["status"] = status
+    payload["complete_at"] = dt.utcnow().isoformat()
+
+    if status == "SUCCESS":
+        payload["published"] = True
+
+    else:
+        payload["published"] = False
+
+    persist_json(run_context.metadata_path, payload)
+
+
+# ------------------------------------------------------------
+# PIPELINE ORCHESTRATOR
+# ------------------------------------------------------------
+
+
 def main() -> None:
+    """
+    Pipeline execution controller.
+
+    Execution order:
+
+    1. Initialize run context and directory structure.
+    2. Capture raw snapshot and initialize metadata.
+    3. Run initial validation on raw data.
+       - Exit if structural errors exist.
+    4. Apply table contracts in configured parent → child order,
+       propagating invalid order_ids.
+    5. Rerun validation on contracted data.
+       - Exit if any errors or warnings remain.
+    6. Assemble the core event table.
+       - Exit on assembly failure.
+    7. Build semantic layer tables.
+       - Exit on semantic failure.
+    8. Run pre-publish semantic integrity gate.
+       - Exit if gate fails.
+    9. Exit process with success code.
+    """
+
     run_context = RunContext.create()
     run_context.initialize_directories()
 
     # Create raw snapshot at runtime
     snapshot_raw(run_context)
-
-    report_validation_initial = []
+    initiliaze_metadata(run_context)
 
     # Initial validation
     validation_initial = apply_validation(run_context)
-    report_validation_initial.append(validation_initial)
 
     persist_json(
         run_context.logs_path / "validation_initial.json",
         {
             "run_id": run_context.run_id,
-            "report": report_validation_initial,
+            "report": validation_initial,
         },
     )
 
     # Early exit for structural errors else apply contract
     if validation_initial["errors"]:
+        finalize_run(run_context, "FAILED")
         sys.exit(1)
 
     report_contract = []
@@ -90,60 +169,68 @@ def main() -> None:
         },
     )
 
-    report_validation_post_contract = []
-
     # Rerun validation on CONTRACTED data
     validation_post_contract = apply_validation(
         run_context,
         base_path=run_context.contracted_path,
     )
 
-    report_validation_post_contract.append(validation_post_contract)
-
     persist_json(
         run_context.logs_path / "validation_post_contract.json",
         {
             "run_id": run_context.run_id,
-            "report": report_validation_post_contract,
+            "report": validation_post_contract,
         },
     )
 
     # Intervention: Either manual fixing or escalate the data to source owner
     if validation_post_contract["errors"] or validation_post_contract["warnings"]:
+        finalize_run(run_context, "FAILED")
         sys.exit(1)
-
-    report_assemble = []
 
     # Assemble event table
     assemble = assemble_events(run_context)
-    report_assemble.append(assemble)
 
     persist_json(
         run_context.logs_path / "assemble_report.json",
         {
             "run_id": run_context.run_id,
-            "report": report_assemble,
+            "report": assemble,
         },
     )
 
     if assemble["status"] == "failed":
+        finalize_run(run_context, "FAILED")
         sys.exit(1)
-
-    report_semantic = []
 
     # Semantic modeling
     semantic = build_semantic_layer(run_context)
-    report_semantic.append(semantic)
 
     persist_json(
         run_context.logs_path / "semantic_report.json",
         {
             "run_id": run_context.run_id,
-            "report": report_semantic,
+            "report": semantic,
         },
     )
 
     if semantic["status"] == "failed":
+        finalize_run(run_context, "FAILED")
+        sys.exit(1)
+
+    # Pre-publish semantic integrity validation
+    gate = run_integrity_gate(run_context)
+
+    persist_json(
+        run_context.logs_path / "publish_integrity_report.json",
+        {
+            "run_id": run_context.run_id,
+            "report": gate,
+        },
+    )
+
+    if gate["status"] == "failed":
+        finalize_run(run_context, "FAILED")
         sys.exit(1)
 
     sys.exit(0)

@@ -137,6 +137,15 @@ def test_main_success(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
+        "data_pipeline.run_pipeline.run_integrity_gate",
+        lambda *a, **k: {
+            "status": "success",
+            "errors": [],
+            "info": [],
+        },  # Pass, status success
+    )
+
+    monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",
         lambda *_: None,
     )
