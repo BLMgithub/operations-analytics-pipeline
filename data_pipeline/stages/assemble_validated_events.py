@@ -10,6 +10,10 @@
 import pandas as pd
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
+from data_pipeline.shared.table_configs import (
+    ASSEMBLE_ENFORCED_SCHEMA,
+    ASSEMBLE_ENFORCED_DTYPES,
+)
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
 EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
@@ -136,46 +140,12 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
     - Resets index to produce a clean output frame
     """
 
-    ENFORCED_SCHEMA = [
-        "order_id",
-        "order_revenue",
-        "seller_id",
-        "product_id",
-        "order_status",
-        "order_purchase_timestamp",
-        "order_approved_at",
-        "order_delivered_timestamp",
-        "lead_time_days",
-        "approval_lag_days",
-        "delivery_delay_days",
-        "order_date",
-        "order_year",
-        "order_year_week",
-        "run_id",
-    ]
-
-    ENFORCED_DTYPES = {
-        "order_id": "string",
-        "order_revenue": "float64",
-        "seller_id": "string",
-        "product_id": "string",
-        "order_status": "string",
-        "order_purchase_timestamp": "datetime64[ns]",
-        "order_approved_at": "datetime64[ns]",
-        "order_delivered_timestamp": "datetime64[ns]",
-        "lead_time_days": "int64",
-        "approval_lag_days": "int64",
-        "delivery_delay_days": "int64",
-        "order_date": "datetime64[ns]",
-        "order_year": "int64",
-    }
-
-    missing_cols = set(ENFORCED_SCHEMA) - set(df.columns)
+    missing_cols = set(ASSEMBLE_ENFORCED_SCHEMA) - set(df.columns)
     if missing_cols:
         raise RuntimeError(f"missing required columns: {sorted(missing_cols)}")
 
-    df_contract = df[ENFORCED_SCHEMA].copy()
-    df_contract = df_contract.astype(ENFORCED_DTYPES)
+    df_contract = df[ASSEMBLE_ENFORCED_SCHEMA].copy()
+    df_contract = df_contract.astype(ASSEMBLE_ENFORCED_DTYPES)
     df_contract = df_contract.sort_values("order_id").reset_index(drop=True)
 
     return df_contract
