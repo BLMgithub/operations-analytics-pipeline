@@ -1,0 +1,131 @@
+# =============================================================================
+# PUBLISH ACTIVATION GATE
+# =============================================================================
+
+import pandas as pd
+
+from typing import Dict, List
+from data_pipeline.shared.run_context import RunContext
+from data_pipeline.shared.table_configs import (
+    SELLER_FACT_ENFORCED_SCHEMA,
+    SELLER_DIM_ENFORCED_SCHEMA,
+)
+
+# ------------------------------------------------------------
+# ASSEMBLE REPORT & LOGS
+# ------------------------------------------------------------
+
+
+def init_report():
+    return {"status": "success", "errors": [], "info": []}
+
+
+def log_info(message: str, report: Dict[str, List[str]]) -> None:
+    print(f"[INFO] {message}")
+    report["info"].append(message)
+
+
+def log_error(message: str, report: Dict[str, list[str]]) -> None:
+    print(f"[ERROR] {message}")
+    report["errors"].append(message)
+
+
+# ------------------------------------------------------------
+# PRE-PUBLISH INTEGRITY GATE
+# ------------------------------------------------------------
+
+
+def run_integrity_gate(run_context: RunContext) -> Dict:
+    """
+    Pre-publish semantic integrity gate.
+
+    Verifies that the semantic layer is complete, structurally valid,
+    and safe for downstream consumption before any publish action.
+
+    Chronological behavior:
+
+    - Initializes run-scoped reporting.
+    - Validates semantic output directory exists.
+    - Confirms actual parquet file set exactly matches the expected set.
+    - Loads each required semantic table.
+    - Validates each table is readable and non-empty.
+    - Verifies required schema columns are present per table type.
+    - Emits success signal when all checks pass.
+
+    Gate intent:
+
+    - Detect partial publishes
+    - Detect schema drift entering BI layer
+    - Detect empty or corrupt semantic outputs
+    """
+
+    report = init_report()
+    semantic_path = run_context.semantic_path
+
+    year = run_context.run_id[:4]
+    month = run_context.run_id[4:6]
+
+    # Validate semantic directory exists
+    if not semantic_path.exists():
+        log_error("Semantic directory is missing", report)
+        report["status"] = "failed"
+
+        return report
+
+    # Validate expected semantic file set exactly matches required set
+    seller_expected_files = {
+        f"seller_week_performance_fact_{year}_{month}.parquet",
+        f"seller_dim_{year}_{month}.parquet",
+    }
+
+    seller_actual_files = {
+        file.name for file in run_context.semantic_path.glob("*.parquet")
+    }
+
+    if seller_actual_files != seller_expected_files:
+        log_error("Semantic file set mismatch", report)
+        report["status"] = "failed"
+
+        return report
+
+    # Validate required parquet files exist
+    for file_name in seller_expected_files:
+        path = semantic_path / file_name
+
+        try:
+            df = pd.read_parquet(path)
+
+        except Exception as e:
+            log_error(f"{file_name} failed to load: {e}", report)
+            report["status"] = "failed"
+
+            return report
+
+        # Validate dataframe not empty
+        if df is None or df.empty:
+            log_error(f"{file_name} logical table missing or empty", report)
+            report["status"] = "failed"
+
+            return report
+
+        # Validate required schema columns present
+        if "seller_week_performance_fact" in file_name:
+            required_cols = SELLER_FACT_ENFORCED_SCHEMA
+        else:
+            required_cols = SELLER_DIM_ENFORCED_SCHEMA
+
+        missing = set(required_cols) - set(df.columns)
+
+        if missing:
+            log_error(f"{file_name} required column(s): {sorted(missing)}", report)
+            report["status"] = "failed"
+
+            return report
+
+    log_info("Pre-publishing validation passed", report)
+    return report
+
+
+# =============================================================================
+# END OF SCRIPT
+# =============================================================================

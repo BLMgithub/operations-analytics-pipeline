@@ -23,8 +23,13 @@ from pathlib import Path
 # ------------------------------------------------------------
 
 
-def init_report() -> Dict[str, List[str]]:
-    return {"errors": [], "warnings": [], "info": []}
+def init_report():
+    return {
+        "status": "success",
+        "errors": [],
+        "warnings": [],
+        "info": [],
+    }
 
 
 def log_info(message: str, report: Dict[str, List[str]]) -> None:
@@ -388,6 +393,9 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
         error(f"missing expected table(s) {missing_tables}")
 
     run_cross_table_validations(tables, report)
+
+    if len(report["warnings"] or report["errors"]) > 0:
+        report["status"] = "failed"
 
     return report
 

@@ -104,8 +104,8 @@ def valid_products_df():
 def test_init_report_structure():
     report = init_report()
 
-    assert set(report.keys()) == {"errors", "warnings", "info"}
-    assert all(isinstance(v, list) for v in report.values())
+    assert set(report.keys()) == {"status", "errors", "warnings", "info"}
+    assert all(isinstance(v, list | str) for v in report.values())
 
 
 def test_log_error_appends_only_to_errors(empty_report):

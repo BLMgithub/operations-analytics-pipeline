@@ -290,7 +290,7 @@ def test_build_semantic_layer_success(tmp_path, valid_assembled_df):
         run_context.semantic_path / "seller_week_performance_fact_dumm_y_.parquet"
     )
 
-    output_path_dim = run_context.semantic_path / "dim_seller_dumm_y_.parquet"
+    output_path_dim = run_context.semantic_path / "seller_dim_dumm_y_.parquet"
 
     assert report["status"] == "success"
     assert output_path_seller.exists()

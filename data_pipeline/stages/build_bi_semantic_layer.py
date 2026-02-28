@@ -8,6 +8,12 @@
 import pandas as pd
 from typing import Dict, List, Tuple, Literal
 from data_pipeline.shared.run_context import RunContext
+from data_pipeline.shared.table_configs import (
+    SELLER_DIM_ENFORCED_SCHEMA,
+    SELLER_DIM_ENFORCED_DTYPES,
+    SELLER_FACT_ENFORCED_SCHEMA,
+    SELLER_FACT_ENFORCED_DTYPES,
+)
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
 
@@ -140,46 +146,14 @@ def freeze_seller_semantic(
 
         fact_contract = df.copy()
 
-        FACT_SCHEMA = [
-            "seller_id",
-            "order_year_week",
-            "week_start_date",
-            "run_id",
-            "weekly_order_count",
-            "weekly_delivered_orders",
-            "weekly_cancelled_orders",
-            "weekly_revenue",
-            "weekly_avg_lead_time",
-            "weekly_total_lead_time",
-            "weekly_avg_delivery_delay",
-            "weekly_total_delivery_delay",
-            "weekly_avg_approval_lag",
-        ]
-
-        FACT_ENFORCED_DTYPES = {
-            "seller_id": "string",
-            "order_year_week": "string",
-            "week_start_date": "datetime64[ns]",
-            "run_id": "string",
-            "weekly_order_count": "int64",
-            "weekly_delivered_orders": "int64",
-            "weekly_cancelled_orders": "int64",
-            "weekly_revenue": "float64",
-            "weekly_avg_lead_time": "float64",
-            "weekly_total_lead_time": "int64",
-            "weekly_avg_delivery_delay": "float64",
-            "weekly_total_delivery_delay": "int64",
-            "weekly_avg_approval_lag": "float64",
-        }
-
-        missing_cols = set(FACT_SCHEMA) - set(fact_contract.columns)
+        missing_cols = set(SELLER_FACT_ENFORCED_SCHEMA) - set(fact_contract.columns)
         if missing_cols:
             raise RuntimeError(
                 f"seller_weekly_fact missing required column(s): {sorted(missing_cols)}"
             )
 
-        fact_contract = fact_contract[FACT_SCHEMA].copy()
-        fact_contract = fact_contract.astype(FACT_ENFORCED_DTYPES)
+        fact_contract = fact_contract[SELLER_FACT_ENFORCED_SCHEMA].copy()
+        fact_contract = fact_contract.astype(SELLER_FACT_ENFORCED_DTYPES)
         fact_contract = fact_contract.sort_values(
             ["seller_id", "order_year_week"]
         ).reset_index(drop=True)
@@ -204,28 +178,14 @@ def freeze_seller_semantic(
 
         dim_contract = df.copy()
 
-        DIM_SCHEMA = [
-            "seller_id",
-            "first_order_date",
-            "first_order_year_week",
-            "run_id",
-        ]
-
-        DIM_ENFORCED_DTYPES = {
-            "seller_id": "string",
-            "first_order_date": "datetime64[ns]",
-            "first_order_year_week": "string",
-            "run_id": "string",
-        }
-
-        missing_cols = set(DIM_SCHEMA) - set(dim_contract.columns)
+        missing_cols = set(SELLER_DIM_ENFORCED_SCHEMA) - set(dim_contract.columns)
         if missing_cols:
             raise RuntimeError(
                 f"seller_dim missing required column(s): {sorted(missing_cols)}"
             )
 
-        dim_contract = dim_contract[DIM_SCHEMA].copy()
-        dim_contract = dim_contract.astype(DIM_ENFORCED_DTYPES)
+        dim_contract = dim_contract[SELLER_DIM_ENFORCED_SCHEMA].copy()
+        dim_contract = dim_contract.astype(SELLER_DIM_ENFORCED_DTYPES)
         dim_contract = dim_contract.sort_values("seller_id").reset_index(drop=True)
 
         return dim_contract
@@ -311,7 +271,7 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
 
     seller_semantic_tables = {
         f"seller_week_performance_fact_{year}_{month}.parquet": seller_fact_contracted,
-        f"dim_seller_{year}_{month}.parquet": seller_dim_contracted,
+        f"seller_dim_{year}_{month}.parquet": seller_dim_contracted,
     }
 
     for table_name, table in seller_semantic_tables.items():
