@@ -148,14 +148,14 @@ def test_main_success(monkeypatch, tmp_path):
         },  # Pass, status success
     )
 
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.promote_semantic_version",
-        lambda *a, **k: {
-            "status": "success",
-            "errors": [],
-            "info": [],
-        },  # Pass, status success
-    )
+    # monkeypatch.setattr(
+    #     "data_pipeline.run_pipeline.promote_semantic_version",
+    #     lambda *a, **k: {
+    #         "status": "success",
+    #         "errors": [],
+    #         "info": [],
+    #     },  # Pass, status success
+    # )
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",

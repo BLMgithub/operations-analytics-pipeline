@@ -18,6 +18,7 @@ from data_pipeline.stages.build_bi_semantic_layer import build_semantic_layer
 from data_pipeline.stages.publish_lifecycle import (
     run_integrity_gate,
     promote_semantic_version,
+    activate_published_version,
 )
 
 
@@ -84,7 +85,7 @@ def finalize_run(run_context: RunContext, status: str) -> None:
         payload = json.load(file)
 
     payload["status"] = status
-    payload["complete_at"] = dt.utcnow().isoformat()
+    payload["completed_at"] = dt.utcnow().isoformat()
 
     if status == "SUCCESS":
         payload["published"] = True
@@ -249,6 +250,21 @@ def main() -> None:
 
     if promotion["status"] == "failed":
         finalize_run(run_context, "FAILED")
+        sys.exit(1)
+
+    finalize_run(run_context, "SUCCESS")
+
+    activation = activate_published_version(run_context)
+
+    persist_json(
+        run_context.logs_path / "publish_activation_report.json",
+        {
+            "run_id": run_context.run_id,
+            "report": activation,
+        },
+    )
+
+    if activation["status"] == "failed":
         sys.exit(1)
 
     sys.exit(0)

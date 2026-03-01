@@ -294,7 +294,8 @@ def test_promote_semantic_version_fails_on_making_directory(tmp_path):
     run_context.initialize_directories()
 
     # Force mkdir to raise
-    run_context.version_path.mkdir(parents=True)
+    published_version_path = run_context.version_path / "seller_semantic"
+    published_version_path.mkdir(parents=True)
 
     report = promote_semantic_version(run_context)
 

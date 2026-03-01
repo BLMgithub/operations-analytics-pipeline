@@ -4,6 +4,9 @@
 
 import pandas as pd
 import shutil
+from datetime import datetime as dt
+import json
+import os
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
@@ -157,7 +160,7 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
     report = init_report()
 
     semantic_path = run_context.semantic_path
-    version_path = run_context.version_path
+    version_path = run_context.version_path / "seller_semantic"
 
     if version_path.exists():
         report["status"] = "failed"
@@ -187,6 +190,57 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
         return report
 
     log_info("Semantic artifacts promoted successfully", report)
+
+    return report
+
+
+# ------------------------------------------------------------
+# PUBLISHED ATOMIC POINTER
+# ------------------------------------------------------------
+
+
+def activate_published_version(run_context: RunContext) -> Dict:
+    """
+    Published version activation step.
+
+    Atomically updates the latest-version pointer to the newly promotedsemantic snapshot. <br>
+    Guarantee BI dashboards read only fully published versions.
+
+    Chronological behavior:
+
+    - Initializes run-scoped reporting.
+    - Builds the pointer payload with run lineage metadata.
+    - Writes payload to a temporary pointer file.
+    - Atomically swaps the temporary file into the latest pointer path.
+    - Emits success signal when the swap completes.
+
+    Notes:
+    - Uses temp-file + os.replace for atomicity.
+    - Assumes version promotion has already succeeded.
+    """
+
+    report = init_report()
+
+    latest_path = run_context.latest_pointer_path
+    tmp_path = latest_path.with_suffix(".tmp")
+
+    payload = {
+        "run_id": run_context.run_id,
+        "version": f"v{run_context.run_id}",
+        "published_at": dt.utcnow().isoformat(),
+    }
+
+    try:
+        with open(tmp_path, "w") as file:
+            json.dump(payload, file, indent=2)
+
+        os.replace(tmp_path, latest_path)
+
+    except Exception as e:
+        report["status"] = "failed"
+        log_error(str(e), report)
+
+    log_info("Atomic pointer swap successful", report)
 
     return report
 
