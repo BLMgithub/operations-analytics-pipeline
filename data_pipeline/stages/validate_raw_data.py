@@ -206,7 +206,7 @@ def run_event_fact_validations(
         invalid_count = ts.isna().sum()
         if invalid_count > 0:
             log_warning(
-                f"{table_name}: {invalid_count} unparsable timestamp value(s) in `{col}`",
+                f"{table_name}: {invalid_count} unparsable timestamp value(s) in {col}",
                 report,
             )
 

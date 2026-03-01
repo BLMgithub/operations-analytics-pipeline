@@ -15,7 +15,10 @@ from data_pipeline.stages.validate_raw_data import apply_validation
 from data_pipeline.stages.apply_raw_data_contract import apply_contract
 from data_pipeline.stages.assemble_validated_events import assemble_events
 from data_pipeline.stages.build_bi_semantic_layer import build_semantic_layer
-from data_pipeline.stages.publish_lifecycle import run_integrity_gate
+from data_pipeline.stages.publish_lifecycle import (
+    run_integrity_gate,
+    promote_semantic_version,
+)
 
 
 # ------------------------------------------------------------
@@ -230,6 +233,21 @@ def main() -> None:
     )
 
     if gate["status"] == "failed":
+        finalize_run(run_context, "FAILED")
+        sys.exit(1)
+
+    # Copy validated semantics to version directory
+    promotion = promote_semantic_version(run_context)
+
+    persist_json(
+        run_context.logs_path / "publish_promotion_report.json",
+        {
+            "run_id": run_context.run_id,
+            "report": promotion,
+        },
+    )
+
+    if promotion["status"] == "failed":
         finalize_run(run_context, "FAILED")
         sys.exit(1)
 

@@ -4,6 +4,7 @@
 
 import pandas as pd
 import pytest
+import shutil
 
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.stages.publish_lifecycle import (
@@ -11,6 +12,7 @@ from data_pipeline.stages.publish_lifecycle import (
     log_info,
     log_error,
     run_integrity_gate,
+    promote_semantic_version,
 )
 
 
@@ -119,9 +121,9 @@ def test_run_integrity_gate_success(
     assert "Pre-publishing validation passed" in report["info"]
 
 
-def test_run_integrity_gate_fails_on_missing_directory():
+def test_run_integrity_gate_fails_on_missing_directory(tmp_path):
 
-    run_context = RunContext.create()
+    run_context = RunContext.create(base_path=tmp_path)
 
     report = run_integrity_gate(run_context)
 
@@ -225,6 +227,110 @@ def test_run_integrity_gate_fails_on_missing_columns(
     assert any(
         "required column(s): ['seller_id']" in error for error in report["errors"]
     )
+
+
+# ------------------------------------------------------------
+# PRE-PUBLISH VALIDATION GATE
+# ------------------------------------------------------------
+
+
+def test_promote_semantic_version_success(
+    tmp_path,
+    valid_seller_fact,
+    valid_seller_dim,
+):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    valid_seller_fact.to_parquet(
+        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
+        index=False,
+    )
+
+    valid_seller_dim.to_parquet(
+        run_context.semantic_path / "seller_dim_2023_01.parquet",
+        index=False,
+    )
+
+    report = promote_semantic_version(run_context)
+
+    assert "success" in report["status"]
+    assert "Semantic artifacts promoted successfully" in report["info"]
+
+
+def test_promote_semantic_version_fails_on_existing_version_directory(
+    tmp_path,
+    valid_seller_fact,
+    valid_seller_dim,
+):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    valid_seller_fact.to_parquet(
+        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
+        index=False,
+    )
+
+    valid_seller_dim.to_parquet(
+        run_context.semantic_path / "seller_dim_2023_01.parquet",
+        index=False,
+    )
+
+    # Initial run that created the directory
+    _ = promote_semantic_version(run_context)
+
+    # Fails due to existing version directory on same run_id
+    report = promote_semantic_version(run_context)
+
+    assert "failed" in report["status"]
+    assert "Version directory already exists" in report["errors"]
+
+
+def test_promote_semantic_version_fails_on_making_directory(tmp_path):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    # Force mkdir to raise
+    run_context.version_path.mkdir(parents=True)
+
+    report = promote_semantic_version(run_context)
+
+    assert report["status"] == "failed"
+    assert any("File exists" in e or "exists" in e for e in report["errors"])
+
+
+def test_promote_semantic_version_fails_on_copying_semantic(
+    tmp_path,
+    monkeypatch,
+    valid_seller_fact,
+    valid_seller_dim,
+):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    valid_seller_fact.to_parquet(
+        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
+        index=False,
+    )
+    valid_seller_dim.to_parquet(
+        run_context.semantic_path / "seller_dim_2023_01.parquet",
+        index=False,
+    )
+
+    # force shutil.copy2 to raise
+    def mock_copy2(*args, **kwargs):
+        raise RuntimeError("copy failure")
+
+    monkeypatch.setattr(shutil, "copy2", mock_copy2)
+
+    report = promote_semantic_version(run_context)
+
+    assert report["status"] == "failed"
+    assert any("copy failure" in e for e in report["errors"])
 
 
 # =============================================================================

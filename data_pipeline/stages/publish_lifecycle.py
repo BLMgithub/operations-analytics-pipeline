@@ -3,6 +3,7 @@
 # =============================================================================
 
 import pandas as pd
+import shutil
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
@@ -123,6 +124,70 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
             return report
 
     log_info("Pre-publishing validation passed", report)
+    return report
+
+
+# ------------------------------------------------------------
+# PROMOTE VALIDATED SEMANTIC
+# ------------------------------------------------------------
+
+
+def promote_semantic_version(run_context: RunContext) -> Dict:
+    """
+    Semantic version promotion step.
+
+    Publishes the validated semantic artifacts into the run-scoped
+    version directory for downstream consumption and lineage tracking.
+
+    Chronological behavior:
+
+    - Initializes run-scoped reporting.
+    - Verifies the target version directory does not already exist.
+    - Creates the version directory for the current run.
+    - Copies all semantic parquet artifacts into the version directory.
+    - Emits success signal when promotion completes.
+
+    Promotion intent:
+
+    - Create an immutable, run-versioned semantic snapshot
+    - Provide a stable handoff point for BI consumption
+    - Preserve lineage between run_id and published artifacts
+    """
+
+    report = init_report()
+
+    semantic_path = run_context.semantic_path
+    version_path = run_context.version_path
+
+    if version_path.exists():
+        report["status"] = "failed"
+        log_error("Version directory already exists", report)
+
+        return report
+
+    # Create version directory
+    try:
+        version_path.mkdir(parents=True, exist_ok=False)
+
+    except Exception as e:
+        report["status"] = "failed"
+        log_error(str(e), report)
+
+        return report
+
+    # Copy validated semantics to version directory
+    try:
+        for file in semantic_path.glob("*.parquet"):
+            shutil.copy2(file, version_path / file.name)
+
+    except Exception as e:
+        report["status"] = "failed"
+        log_error(str(e), report)
+
+        return report
+
+    log_info("Semantic artifacts promoted successfully", report)
+
     return report
 
 
