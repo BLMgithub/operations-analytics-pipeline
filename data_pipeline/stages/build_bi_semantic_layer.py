@@ -8,7 +8,7 @@
 import pandas as pd
 from typing import Dict, List, Tuple, Literal
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.table_configs import (
+from data_pipeline.shared.modeling_configs import (
     SELLER_DIM_ENFORCED_SCHEMA,
     SELLER_DIM_ENFORCED_DTYPES,
     SELLER_FACT_ENFORCED_SCHEMA,
@@ -45,23 +45,22 @@ def seller_weekly_semantic(
     df: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Seller weekly semantic builder.
-
-    Transforms the assembled event table into seller-level weekly
-    performance fact and supporting seller dimension.
-
-    Transform behavior:
-
-    - Validates single-run lineage via `run_id`
-    - Derives weekly alignment fields and status flags
-    - Aggregates event data to seller-week grain
-    - Builds seller dimension from first observed activity
+    Build seller weekly semantic layer from assembled events.
 
     Fact grain:
-    - One row per (seller_id, order_year_week)
+    - 1 row per (seller_id, order_year_week)
 
     Dimension grain:
-    - One row per seller_id
+    - 1 row per seller_id
+
+    Behavior:
+    - Enforce single run_id lineage
+    - Derive ISO week alignment
+    - Aggregate event metrics to seller-week
+
+    Returns:
+    - Aggregated fact dataframe
+    - Seller dimension dataframe
     """
 
     read_assembled = df.copy()
@@ -109,40 +108,26 @@ def freeze_seller_semantic(
     table_type: Literal["fact", "dim"],
 ) -> pd.DataFrame:
     """
-    Seller semantic contract enforcer.
+    Enforce seller semantic contract.
 
-    Routes the input table to the appropriate fact or dimension
-    contract freezer and enforces grain integrity before projection.
+    For fact:
+    - Validate required columns
+    - Enforce (seller_id, order_year_week) uniqueness
+    - Apply projection, dtype enforcement, deterministic sort
 
-    Behavior:
+    For dimension:
+    - Validate required columns
+    - Enforce seller_id uniqueness
+    - Apply projection and dtype enforcement
 
-    - Validates `table_type` selector
-    - Applies grain-level duplicate checks:
-      - fact: (seller_id, order_year_week)
-      - dim: seller_id
-    - Dispatches to the corresponding schema freezer
-    - Returns a BI-ready, schema-stable dataframe
+    Raise:
+    - RuntimeError on schema or grain violation
     """
 
     if table_type not in {"fact", "dim"}:
         raise ValueError
 
     def freeze_seller_fact(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Seller weekly fact contract enforcement.
-
-        Projects the aggregated seller-week dataset into the approved
-        fact schema, enforces dtypes, and applies deterministic ordering.
-
-        Enforcement actions:
-
-        - Validates presence of all required fact columns
-        - Projects to the contract column order
-        - Casts fields to enforced dtypes
-        - Sorts by (seller_id, order_year_week)
-        - Resets index for clean downstream consumption
-
-        """
 
         fact_contract = df.copy()
 
@@ -161,20 +146,6 @@ def freeze_seller_semantic(
         return fact_contract
 
     def freeze_seller_dim(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Seller dimension contract enforcement.
-
-        Projects the seller dimension into the approved schema,
-        enforces dtypes, and applies deterministic ordering.
-
-        Enforcement actions:
-
-        - Validates presence of all required dimension columns
-        - Projects to the contract column order
-        - Casts fields to enforced dtypes
-        - Sorts by seller_id
-        - Resets index for clean downstream consumption
-        """
 
         dim_contract = df.copy()
 
@@ -216,20 +187,24 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
     """
     Semantic layer orchestrator.
 
-    Builds seller performance semantic tables from the assembled
-    event layer and exports contract-compliant BI artifacts.
+    Builds semantic modules from the assembled event layer and
+    exports contract-compliant BI artifacts.
 
-    Chronological behavior:
+    Execution:
+    - Load assembled event dataset (order grain)
+    - Fail fast if dataset is missing or empty
+    - Execute registered semantic builders
+    - Apply module-level freeze contracts
+    - Export semantic artifacts into run-scoped semantic directory
+    - Aggregate findings into report
 
-    - Initializes run-scoped reporting and logging helpers.
-    - Loads the assembled_events logical table.
-    - Fails fast if the assembled dataset is missing or empty.
-    - Executes semantic pipeline:
-      - seller_weekly_semantic (aggregation)
-      - freeze_seller_semantic (fact and dimension contracts)
-    - Generates run-partitioned output filenames.
-    - Exports semantic tables to the run-scoped semantic directory.
-    - Aggregates all findings into the returned report.
+    Guarantees:
+    - Each semantic module enforces its declared grain
+    - All exported tables are contract-compliant
+    - No decision logic embedded
+
+    Failure:
+    - Any module failure halts semantic stage
     """
 
     report = init_report()

@@ -17,6 +17,20 @@ def _generate_run_id() -> str:
 
 @dataclass
 class RunContext:
+    """
+    Run-scoped execution context.
+
+    Responsibilities:
+    - Generate and hold run_id
+    - Define all stage directory paths
+    - Provide consistent path resolution across stages
+    - Enforce run isolation via run-scoped folders
+
+    Guarantees:
+    - Each run writes only within its own directory tree
+    - Published artifacts are resolved deterministically from run_id
+    """
+
     run_id: str
     base_path: str | Path
 

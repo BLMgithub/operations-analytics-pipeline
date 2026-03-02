@@ -330,23 +330,21 @@ def run_cross_table_validations(
 
 def apply_validation(run_context: RunContext, base_path: Path | None = None) -> Dict:
     """
-    Coordinates table loading and layered validations, aggregating all findings
-    into a single report for the main pipeline controller.
+    Run structural validation across all configured raw tables.
 
-    Chronological behavior:
+    Behavior:
+    - Loads logical tables from snapshot or contracted layer
+    - Applies base structural checks (schema, PK, emptiness)
+    - Dispatches role-specific validators
+    - Executes cross-table integrity checks
 
-    - Initializes the validation report and logging helpers.
-    - Loads each configured logical table from the snapshot.
-    - Runs the baseline structural gate per table:
-    - Tables that fail the base gate are excluded from downstream validators.
-    - Dispatches role-specific validators based on table role.
-    - Emits an error when expected tables are missing.
-    - Executes cross-table integrity checks on successfully loaded tables.
+    Severity model:
+    - errors: structurally invalid → halt upstream
+    - warnings: admissible but repairable issues
 
-    Notes:
-
-    - This function does not terminate the pipeline.
-    - Final pass/fail handling is delegated to the main orchestrator via the report.
+    Non-responsibilities:
+    - No data mutation
+    - No process termination
     """
 
     if base_path is None:

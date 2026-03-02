@@ -136,26 +136,28 @@ def apply_contract(
     run_context: RunContext, table_name: str, invalid_order_ids: set | None = None
 ) -> tuple[dict, set]:
     """
-    Applies role-driven deterministic normalization, producing a cleaned
-    dataset and a structured execution report.
+    Enforce structural contract on a single logical table.
 
-    Chronological behavior:
-    - Initializes contract metrics and error container.
-    - Validates table eligibility against TABLE_CONFIG.
-    - Loads the logical table from the raw snapshot.
-    - Applies role-specific contract steps:
-        - **event_fact:**
-            - exact deduplication
-            - timestamp parse enforcement
-            - temporal invariant enforcement (produces invalid `order_ids`)
-        - **transaction_detail:**
-            - exact deduplication
-            - optional cascade removal using upstream invalid `order_ids`
-        - **entity_reference:**
-            - exact deduplication only.
-    - Records row-level impact for each enforcement step.
-    - Writes the contracted output to the contract layer.
-    - Returns the execution report and any newly invalidated `order_ids`.
+    Role-driven behavior:
+    - event_fact:
+        - exact deduplication
+        - remove unparsable timestamps
+        - remove temporal violations
+        - emit invalid order_ids
+    - transaction_detail:
+        - deduplicate
+        - cascade drop invalid order_ids
+    - entity_reference:
+        - deduplicate only
+
+    Guarantees:
+    - Deterministic row removal
+    - No numeric or domain correction
+    - Output written to contracted layer
+
+    Returns:
+    - Contract execution report
+    - Newly invalidated order_ids (if any)
     """
 
     report = {

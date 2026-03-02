@@ -10,7 +10,7 @@
 import pandas as pd
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.table_configs import (
+from data_pipeline.shared.modeling_configs import (
     ASSEMBLE_ENFORCED_SCHEMA,
     ASSEMBLE_ENFORCED_DTYPES,
 )
@@ -158,19 +158,22 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 def assemble_events(run_context: RunContext) -> Dict:
     """
-    Produces the contract-compliant event fact table from validated logical inputs and produce a consolidated run report
+    Assemble contract-compliant event dataset (order grain).
 
-    Chronological behavior:
+    Steps:
+    - Load contracted event tables
+    - Merge with cardinality enforcement (1 row per order_id)
+    - Derive temporal metrics and lineage fields
+    - Freeze schema and enforce dtypes
+    - Export deterministic output
 
-    - Initializes run-scoped reporting and logging helpers.
-    - Loads all required event-source tables from the contracted layer.
-    - Fails fast if any required table is missing or empty.
-    - Executes core assembly pipeline:
-      - merge_data (grain enforcement)
-      - derive_fields (event enrichment)
-      - freeze_schema (final contract projection)
-    - Exports the assembled dataset to the run-scoped output path.
-    - Aggregates all findings into the returned report.
+    Grain:
+    - One row per order_id (hard fail on violation)
+
+    Non-responsibilities:
+    - No validation
+    - No repair
+    - No business logic
     """
 
     report = init_report()

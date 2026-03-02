@@ -10,7 +10,7 @@ import os
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.table_configs import (
+from data_pipeline.shared.modeling_configs import (
     SELLER_FACT_ENFORCED_SCHEMA,
     SELLER_DIM_ENFORCED_SCHEMA,
 )
@@ -43,24 +43,19 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
     """
     Pre-publish semantic integrity gate.
 
-    Verifies that the semantic layer is complete, structurally valid,
-    and safe for downstream consumption before any publish action.
+    Validations:
+    - Semantic directory exists
+    - Expected file set matches semantic registry
+    - Parquet files load successfully
+    - Tables are non-empty
+    - Required schema columns present
 
-    Chronological behavior:
+    Intent:
+    - Prevent partial or corrupt publish
+    - Block schema drift into BI layer
 
-    - Initializes run-scoped reporting.
-    - Validates semantic output directory exists.
-    - Confirms actual parquet file set exactly matches the expected set.
-    - Loads each required semantic table.
-    - Validates each table is readable and non-empty.
-    - Verifies required schema columns are present per table type.
-    - Emits success signal when all checks pass.
-
-    Gate intent:
-
-    - Detect partial publishes
-    - Detect schema drift entering BI layer
-    - Detect empty or corrupt semantic outputs
+    Failure:
+    - Returns failed status; promotion and activation are skipped
     """
 
     report = init_report()
@@ -137,24 +132,20 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
 
 def promote_semantic_version(run_context: RunContext) -> Dict:
     """
-    Semantic version promotion step.
+    Promote validated semantic artifacts into immutable version folder.
 
-    Publishes the validated semantic artifacts into the run-scoped
-    version directory for downstream consumption and lineage tracking.
+    Execution:
+    - Verify version directory does not already exist
+    - Create run-scoped version directory
+    - Copy semantic artifacts into version folder
 
-    Chronological behavior:
-
-    - Initializes run-scoped reporting.
-    - Verifies the target version directory does not already exist.
-    - Creates the version directory for the current run.
-    - Copies all semantic parquet artifacts into the version directory.
-    - Emits success signal when promotion completes.
-
-    Promotion intent:
-
-    - Create an immutable, run-versioned semantic snapshot
-    - Provide a stable handoff point for BI consumption
+    Intent:
+    - Create immutable run-versioned snapshot
     - Preserve lineage between run_id and published artifacts
+    - Prepare artifacts for atomic activation
+
+    Failure:
+    - Returns failed status; no pointer update occurs
     """
 
     report = init_report()
@@ -201,22 +192,19 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
 
 def activate_published_version(run_context: RunContext) -> Dict:
     """
-    Published version activation step.
+    Atomically activate promoted version.
 
-    Atomically updates the latest-version pointer to the newly promotedsemantic snapshot. <br>
-    Guarantee BI dashboards read only fully published versions.
+    Execution:
+    - Write version payload to temporary file
+    - Replace _latest.json using os.replace (atomic swap)
 
-    Chronological behavior:
+    Guarantees:
+    - Dashboards resolve only fully promoted versions
+    - No partial pointer updates possible
 
-    - Initializes run-scoped reporting.
-    - Builds the pointer payload with run lineage metadata.
-    - Writes payload to a temporary pointer file.
-    - Atomically swaps the temporary file into the latest pointer path.
-    - Emits success signal when the swap completes.
-
-    Notes:
-    - Uses temp-file + os.replace for atomicity.
-    - Assumes version promotion has already succeeded.
+    Assumes:
+    - Promotion succeeded
+    - Metadata finalized prior to activation
     """
 
     report = init_report()
