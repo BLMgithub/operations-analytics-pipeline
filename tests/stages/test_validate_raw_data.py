@@ -131,19 +131,17 @@ def test_log_info_appends_only_to_info(empty_report):
 # ------------------------------------------------------------
 
 
-def test_base_validation_fails_on_missing_allowed_column(
+def test_base_validation_fails_on_missing_required_column(
     empty_report,
     valid_customers_df,
 ):
-    df = valid_customers_df.drop(columns="customer_city")
+    df = valid_customers_df.drop(columns="customer_state")
     ok = run_base_validations(
         df,
         "df_customers",
         ["customer_id"],
         [
             "customer_id",
-            "customer_zip_code_prefix",
-            "customer_city",
             "customer_state",
         ],
         empty_report,
@@ -152,35 +150,7 @@ def test_base_validation_fails_on_missing_allowed_column(
     assert ok is False
     assert len(empty_report["errors"]) == 1
     assert any(
-        "df_customers: missing allowed column(s): ['customer_city']" in error
-        for error in empty_report["errors"]
-    )
-
-
-def test_base_validation_fails_on_invalid_extra_column(
-    empty_report,
-    valid_customers_df,
-):
-
-    df = valid_customers_df
-    df["extra_column"] = ["extra", "extra"]
-    ok = run_base_validations(
-        df,
-        "df_customers",
-        ["customer_id"],
-        [
-            "customer_id",
-            "customer_zip_code_prefix",
-            "customer_city",
-            "customer_state",
-        ],
-        empty_report,
-    )
-
-    assert ok is False
-    assert len(empty_report["errors"]) == 1
-    assert any(
-        "df_customers: non-allowed extra column(s): ['extra_column']" in error
+        "df_customers: missing required column(s): ['customer_state']" in error
         for error in empty_report["errors"]
     )
 

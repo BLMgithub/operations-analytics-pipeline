@@ -103,25 +103,31 @@ def finalize_run(run_context: RunContext, status: str) -> None:
 
 def main() -> None:
     """
-    Pipeline execution controller.
+    Pipeline orchestrator.
 
     Execution order:
+    1. Snapshot raw data
+    2. Initialize metadata (RUNNING)
+    3. Validation → halt on errors
+    4. Contract enforcement
+        - Apply role-driven repair
+        - Propagate invalid order_ids (parent → child)
+    5. Re-validation → halt on errors/warnings
+    6. Assemble event table
+    7. Build semantic layer
+    8. Pre-publish integrity gate
+    9. Promote version
+    10. Finalize metadata (SUCCESS)
+    11. Atomic activation
 
-    1. Initialize run context and directory structure.
-    2. Capture raw snapshot and initialize metadata.
-    3. Run initial validation on raw data.
-       - Exit if structural errors exist.
-    4. Apply table contracts in configured parent → child order,
-       propagating invalid order_ids.
-    5. Rerun validation on contracted data.
-       - Exit if any errors or warnings remain.
-    6. Assemble the core event table.
-       - Exit on assembly failure.
-    7. Build semantic layer tables.
-       - Exit on semantic failure.
-    8. Run pre-publish semantic integrity gate.
-       - Exit if gate fails.
-    9. Exit process with success code.
+    Guarantees:
+    - Deterministic forward-only execution
+    - Single run isolation
+    - Only Contract stage mutates data
+    - Activation occurs only after SUCCESS
+
+    Failure behavior:
+    - Any stage failure → metadata FAILED → process exits
     """
 
     run_context = RunContext.create()
