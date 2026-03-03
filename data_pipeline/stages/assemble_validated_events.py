@@ -169,11 +169,6 @@ def assemble_events(run_context: RunContext) -> Dict:
 
     Grain:
     - One row per order_id (hard fail on violation)
-
-    Non-responsibilities:
-    - No validation
-    - No repair
-    - No business logic
     """
 
     report = init_report()

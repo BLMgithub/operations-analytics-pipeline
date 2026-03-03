@@ -56,7 +56,7 @@ def run_base_validations(
     df: pd.DataFrame,
     table_name: str,
     primary_key: List[str],
-    allowed_column: List[str],
+    required_column: List[str],
     report: Dict[str, List[str]],
 ) -> bool:
     """
@@ -66,14 +66,13 @@ def run_base_validations(
     - `errors` - dataset is structurally invalid; downstream validations should stop
     - `warnings` - admissible data quality issues that may be repairable
 
-    **errors:**
+    errors:
     - dataset is empty
-    - missing allowed column(s)
-    - unexpected extra column(s)
+    - missing required column(s)
     - missing primary key column(s)
     - conflicting duplicate primary keys
 
-    **warnings:**
+    warnings:
     - duplicate columns
     - null primary key values
     - identical duplicates
@@ -85,19 +84,15 @@ def run_base_validations(
         return False
 
     actual = set(df.columns)
-    allowed = set(allowed_column)
+    required = set(required_column)
 
-    missing_allowed = sorted(allowed - actual)
-    if missing_allowed:
-        log_error(f"{table_name}: missing allowed column(s): {missing_allowed}", report)
-
-    invalid_column = sorted(actual - allowed)
-    if invalid_column:
+    missing_required = sorted(required - actual)
+    if missing_required:
         log_error(
-            f"{table_name}: non-allowed extra column(s): {invalid_column}", report
+            f"{table_name}: missing required column(s): {missing_required}", report
         )
 
-    if missing_allowed or invalid_column:
+    if missing_required:
         return False
 
     missing_pk_columns = [col for col in primary_key if col not in df.columns]
@@ -174,10 +169,10 @@ def run_event_fact_validations(
     - `errors` - dataset is structurally invalid; downstream validations should stop
     - `warnings` - admissible data quality issues that may be repairable
 
-    **errors:**
+    errors:
     - missing required timestamp column(s)
 
-    **warnings:**
+    warnings:
     - unparsable timestamp values in required timestamp fields
     - approval timestamp earlier than purchase timestamp
     - delivery timestamp earlier than purchase timestamp
@@ -246,7 +241,7 @@ def run_transaction_detail_validations(
 
     Collects error-level data quality findings.
 
-    **errors:**
+    errors:
     - negative values in numeric columns
     """
 
@@ -278,10 +273,10 @@ def run_cross_table_validations(
     - `warnings` - admissible referential integrity issues
     - `info` - validation skipped due to missing required tables
 
-    **info:**
+    info:
     - validation skipped when required tables are unavailable
 
-    **warnings:**
+    warnings:
     - order items referencing non-existent order_id
     - payments referencing non-existent order_id
     """
@@ -341,10 +336,6 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     Severity model:
     - errors: structurally invalid → halt upstream
     - warnings: admissible but repairable issues
-
-    Non-responsibilities:
-    - No data mutation
-    - No process termination
     """
 
     if base_path is None:
@@ -374,7 +365,7 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
         tables[table_name] = df
 
         if not run_base_validations(
-            df, table_name, config["primary_key"], config["allowed_column"], report
+            df, table_name, config["primary_key"], config["required_column"], report
         ):
             continue
 
