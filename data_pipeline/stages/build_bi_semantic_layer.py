@@ -6,13 +6,13 @@
 # - Enforce referential integrity between fact and dimension tables
 
 import pandas as pd
-from typing import Dict, List, Tuple, Literal
+from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.modeling_configs import (
-    SELLER_DIM_ENFORCED_SCHEMA,
-    SELLER_DIM_ENFORCED_DTYPES,
-    SELLER_FACT_ENFORCED_SCHEMA,
-    SELLER_FACT_ENFORCED_DTYPES,
+    SELLER_FACT_SCHEMA,
+    SELLER_FACT_DTYPES,
+    SELLER_DIM_SCHEMA,
+    SELLER_DIM_DTYPES,
 )
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
@@ -37,13 +37,11 @@ def log_error(message: str, report: Dict[str, List[str]]) -> None:
 
 
 # ------------------------------------------------------------
-# SELLER WEEKLY SEMANTIC MODELING AND SCHEMA ENFORCEMENT
+# SELLER WEEKLY SEMANTIC MODELING
 # ------------------------------------------------------------
 
 
-def seller_weekly_semantic(
-    df: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def build_seller_semantic(df: pd.DataFrame) -> Dict:
     """
     Build seller weekly semantic layer from assembled events.
 
@@ -100,82 +98,47 @@ def seller_weekly_semantic(
         run_id=("run_id", "first"),
     )
 
-    return seller_weekly_fact, seller_dim
+    seller_semantic = {
+        "seller_week_performance_fact": seller_weekly_fact,
+        "seller_dim": seller_dim,
+    }
+
+    return seller_semantic
 
 
-def freeze_seller_semantic(
-    df: pd.DataFrame,
-    table_type: Literal["fact", "dim"],
-) -> pd.DataFrame:
-    """
-    Enforce seller semantic contract.
+# ------------------------------------------------------------
+# CUSTOMER SEMANTIC MODELING
+# ------------------------------------------------------------
 
-    For fact:
-    - Validate required columns
-    - Enforce (seller_id, order_year_week) uniqueness
-    - Apply projection, dtype enforcement, deterministic sort
 
-    For dimension:
-    - Validate required columns
-    - Enforce seller_id uniqueness
-    - Apply projection and dtype enforcement
+# ------------------------------------------------------------
+# PRODUCT SEMANTIC MODELING
+# ------------------------------------------------------------
 
-    Raise:
-    - RuntimeError on schema or grain violation
-    """
 
-    if table_type not in {"fact", "dim"}:
-        raise ValueError
+# ------------------------------------------------------------
+# SEMANTIC BUILDING CONTRACTS
+# ------------------------------------------------------------
 
-    def freeze_seller_fact(df: pd.DataFrame) -> pd.DataFrame:
-
-        fact_contract = df.copy()
-
-        missing_cols = set(SELLER_FACT_ENFORCED_SCHEMA) - set(fact_contract.columns)
-        if missing_cols:
-            raise RuntimeError(
-                f"seller_weekly_fact missing required column(s): {sorted(missing_cols)}"
-            )
-
-        fact_contract = fact_contract[SELLER_FACT_ENFORCED_SCHEMA].copy()
-        fact_contract = fact_contract.astype(SELLER_FACT_ENFORCED_DTYPES)
-        fact_contract = fact_contract.sort_values(
-            ["seller_id", "order_year_week"]
-        ).reset_index(drop=True)
-
-        return fact_contract
-
-    def freeze_seller_dim(df: pd.DataFrame) -> pd.DataFrame:
-
-        dim_contract = df.copy()
-
-        missing_cols = set(SELLER_DIM_ENFORCED_SCHEMA) - set(dim_contract.columns)
-        if missing_cols:
-            raise RuntimeError(
-                f"seller_dim missing required column(s): {sorted(missing_cols)}"
-            )
-
-        dim_contract = dim_contract[SELLER_DIM_ENFORCED_SCHEMA].copy()
-        dim_contract = dim_contract.astype(SELLER_DIM_ENFORCED_DTYPES)
-        dim_contract = dim_contract.sort_values("seller_id").reset_index(drop=True)
-
-        return dim_contract
-
-    if table_type == "fact":
-        if df.duplicated(["seller_id", "order_year_week"]).any():
-            raise RuntimeError("Duplicate seller_id - order_year_week in fact")
-
-        seller_fact_contracted = freeze_seller_fact(df)
-
-        return seller_fact_contracted
-
-    else:
-        if df["seller_id"].duplicated().any():
-            raise RuntimeError("Duplicate seller_id in dimension")
-
-        seller_dim_contracted = freeze_seller_dim(df)
-
-        return seller_dim_contracted
+SEMANTIC_MODULES = {
+    "seller_semantic": {
+        "builder": build_seller_semantic,
+        "tables": {
+            "seller_week_performance_fact": {
+                "type": "fact",
+                "grain": ["seller_id", "order_year_week"],
+                "schema": SELLER_FACT_SCHEMA,
+                "dtypes": SELLER_FACT_DTYPES,
+            },
+            "seller_dim": {
+                "type": "dim",
+                "grain": ["seller_id"],
+                "schema": SELLER_DIM_SCHEMA,
+                "dtypes": SELLER_DIM_DTYPES,
+            },
+        },
+    }
+}
 
 
 # ------------------------------------------------------------
@@ -217,48 +180,69 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
 
     assembled_path = run_context.assembled_path
 
-    df = load_logical_table(
+    df_assembled = load_logical_table(
         assembled_path,
         "assembled_events",
         log_info=info,
         log_error=error,
     )
 
-    if df is None or df.empty:
+    if df_assembled is None or df_assembled.empty:
         error("assembled_events logical table missing or empty")
         report["status"] = "failed"
 
         return report
 
-    try:
-        fact_seller, dim_seller = seller_weekly_semantic(df)
-        seller_fact_contracted = freeze_seller_semantic(fact_seller, "fact")
-        seller_dim_contracted = freeze_seller_semantic(dim_seller, "dim")
+    for module_name, module in SEMANTIC_MODULES.items():
 
-    except Exception as e:
-        error(str(e))
-        report["status"] = "failed"
+        try:
+            builder_output = module["builder"](df_assembled)
 
-        return report
-
-    year = run_context.run_id[:4]
-    month = run_context.run_id[4:6]
-
-    seller_semantic_tables = {
-        f"seller_week_performance_fact_{year}_{month}.parquet": seller_fact_contracted,
-        f"seller_dim_{year}_{month}.parquet": seller_dim_contracted,
-    }
-
-    for table_name, table in seller_semantic_tables.items():
-
-        output_path = run_context.semantic_path / table_name
-
-        if not export_file(table, output_path):
-            error(f"{table_name}: Export failed")
+        except Exception as e:
+            error(str(e))
             report["status"] = "failed"
-            break
 
-        info(f"Export success: {table_name} ({len(table)} rows)")
+            continue
+
+        semantic_module_path = run_context.semantic_path / module_name
+
+        # builders return dict {table_name: df}
+        for table_name, df in builder_output.items():
+
+            meta = module["tables"][table_name]
+
+            try:
+                # Validate duplicates
+                if df.duplicated(meta["grain"]).any():
+                    raise RuntimeError(f"Duplicates in {meta['grain']}")
+
+                # Validate required columns
+                missing = set(meta["schema"]) - set(df.columns)
+                if missing:
+                    raise RuntimeError(f"Missing required columns: {missing}")
+
+            except Exception as e:
+                error(str(e))
+                report["status"] = "failed"
+
+            # Enforce dtypes
+            df = df[meta["schema"]].astype(meta["dtypes"])
+
+            # Deterministic sort
+            df = df.sort_values(meta["grain"]).reset_index(drop=True)
+
+            year = run_context.run_id[:4]
+            month = run_context.run_id[4:6]
+
+            filename = f"{table_name}_{year}_{month}.parquet"
+            output_path = semantic_module_path / filename
+
+            if not export_file(df, output_path):
+                error(f"{table_name}: Export failed")
+                report["status"] = "failed"
+                break
+
+            info(f"Export success: {module_name}/{filename} ({len(df)} rows)")
 
     return report
 

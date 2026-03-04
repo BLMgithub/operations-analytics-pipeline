@@ -10,10 +10,7 @@ import os
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.modeling_configs import (
-    SELLER_FACT_ENFORCED_SCHEMA,
-    SELLER_DIM_ENFORCED_SCHEMA,
-)
+from data_pipeline.stages.build_bi_semantic_layer import SEMANTIC_MODULES
 
 # ------------------------------------------------------------
 # ASSEMBLE REPORT & LOGS
@@ -45,6 +42,7 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
 
     Validations:
     - Semantic directory exists
+    - Expected module set matches semantic module registry
     - Expected file set matches semantic registry
     - Parquet files load successfully
     - Tables are non-empty
@@ -64,64 +62,71 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
     year = run_context.run_id[:4]
     month = run_context.run_id[4:6]
 
-    # Validate semantic directory exists
+    # Validate semantic directory
     if not semantic_path.exists():
         log_error("Semantic directory is missing", report)
         report["status"] = "failed"
 
         return report
 
-    # Validate expected semantic file set exactly matches required set
-    seller_expected_files = {
-        f"seller_week_performance_fact_{year}_{month}.parquet",
-        f"seller_dim_{year}_{month}.parquet",
+    # Validate semantic module
+    expected_modules = set(SEMANTIC_MODULES.keys())
+    actual_modules = {
+        directory.name for directory in semantic_path.iterdir() if directory.is_dir()
     }
 
-    seller_actual_files = {
-        file.name for file in run_context.semantic_path.glob("*.parquet")
-    }
-
-    if seller_actual_files != seller_expected_files:
-        log_error("Semantic file set mismatch", report)
+    if actual_modules != expected_modules:
+        log_error("Semantic module mismatch", report)
         report["status"] = "failed"
 
         return report
 
-    # Validate required parquet files exist
-    for file_name in seller_expected_files:
-        path = semantic_path / file_name
+    # Validate expected semantic file set exactly matches required set
+    for module_name, module in SEMANTIC_MODULES.items():
+        module_path = semantic_path / module_name
 
-        try:
-            df = pd.read_parquet(path)
+        expected_files = {
+            f"{table_name}_{year}_{month}.parquet" for table_name in module["tables"]
+        }
 
-        except Exception as e:
-            log_error(f"{file_name} failed to load: {e}", report)
+        actual_files = {file.name for file in module_path.glob("*.parquet")}
+
+        if actual_files != expected_files:
+            log_error("Semantic file set mismatch", report)
             report["status"] = "failed"
 
             return report
 
-        # Validate dataframe not empty
-        if df is None or df.empty:
-            log_error(f"{file_name} logical table missing or empty", report)
-            report["status"] = "failed"
+        # Validate required parquet files exist
+        for table_name, meta in module["tables"].items():
 
-            return report
+            file_name = f"{table_name}_{year}_{month}.parquet"
+            file_path = module_path / file_name
 
-        # Validate required schema columns present
-        if "seller_week_performance_fact" in file_name:
-            required_cols = SELLER_FACT_ENFORCED_SCHEMA
-        else:
-            required_cols = SELLER_DIM_ENFORCED_SCHEMA
+            try:
+                df = pd.read_parquet(file_path)
 
-        missing = set(required_cols) - set(df.columns)
+            except Exception as e:
+                log_error(str(e), report)
+                report["status"] = "failed"
 
-        if missing:
-            log_error(f"{file_name} required column(s): {sorted(missing)}", report)
-            report["status"] = "failed"
+                continue
 
-            return report
+            if df is None or df.empty:
+                log_error(f"{file_name} logical table missing or empty", report)
+                report["status"] = "failed"
 
-    log_info("Pre-publishing validation passed", report)
+                return report
+
+            # Validate required schema columns present
+            missing = set(meta["schema"]) - set(df.columns)
+
+            if missing:
+                log_error(f"{file_name} required column(s): {sorted(missing)}", report)
+                report["status"] = "failed"
+
+                return report
+
     return report
 
 
@@ -151,7 +156,7 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
     report = init_report()
 
     semantic_path = run_context.semantic_path
-    version_path = run_context.version_path / "seller_semantic"
+    version_path = run_context.version_path
 
     if version_path.exists():
         report["status"] = "failed"
@@ -163,24 +168,18 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
     try:
         version_path.mkdir(parents=True, exist_ok=False)
 
-    except Exception as e:
-        report["status"] = "failed"
-        log_error(str(e), report)
+        for module_name in SEMANTIC_MODULES:
+            source_module_path = semantic_path / module_name
+            target_module_path = version_path / module_name
 
-        return report
-
-    # Copy validated semantics to version directory
-    try:
-        for file in semantic_path.glob("*.parquet"):
-            shutil.copy2(file, version_path / file.name)
+            # Copy validated semantics to version directory
+            shutil.copytree(source_module_path, target_module_path)
 
     except Exception as e:
         report["status"] = "failed"
         log_error(str(e), report)
 
         return report
-
-    log_info("Semantic artifacts promoted successfully", report)
 
     return report
 
@@ -210,6 +209,8 @@ def activate_published_version(run_context: RunContext) -> Dict:
     report = init_report()
 
     latest_path = run_context.latest_pointer_path
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+
     tmp_path = latest_path.with_suffix(".tmp")
 
     payload = {
@@ -227,6 +228,48 @@ def activate_published_version(run_context: RunContext) -> Dict:
     except Exception as e:
         report["status"] = "failed"
         log_error(str(e), report)
+
+        # Clean up for tmp_path
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+
+            except Exception:
+                pass
+
+    return report
+
+
+# ------------------------------------------------------------
+# EXECUTE PUBLISH LIFECYCLE
+# ------------------------------------------------------------
+
+
+def execute_publish_lifecycle(run_context: RunContext) -> Dict:
+    """
+    docstring.
+    """
+
+    report = init_report()
+
+    validate_semantic = run_integrity_gate(run_context)
+
+    if validate_semantic["status"] == "failed":
+        return validate_semantic
+
+    log_info("Pre-publishing validation passed", report)
+
+    promote_semantic = promote_semantic_version(run_context)
+
+    if promote_semantic["status"] == "failed":
+        return promote_semantic
+
+    log_info("Semantic artifacts promoted successfully", report)
+
+    semantic_activation = activate_published_version(run_context)
+
+    if semantic_activation["status"] == "failed":
+        return semantic_activation
 
     log_info("Atomic pointer swap successful", report)
 
