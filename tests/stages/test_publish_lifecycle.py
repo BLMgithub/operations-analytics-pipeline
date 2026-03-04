@@ -7,12 +7,14 @@ import pytest
 import shutil
 
 from data_pipeline.shared.run_context import RunContext
+from data_pipeline.stages.build_bi_semantic_layer import SEMANTIC_MODULES
 from data_pipeline.stages.publish_lifecycle import (
     init_report,
     log_info,
     log_error,
     run_integrity_gate,
     promote_semantic_version,
+    execute_publish_lifecycle,
 )
 
 
@@ -105,29 +107,31 @@ def test_run_integrity_gate_success(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    valid_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     report = run_integrity_gate(run_context)
 
-    assert "success" in report["status"]
-    assert "Pre-publishing validation passed" in report["info"]
+    assert report["status"] == "success"
 
 
 def test_run_integrity_gate_fails_on_missing_directory(tmp_path):
 
     run_context = RunContext.create(base_path=tmp_path)
-
     report = run_integrity_gate(run_context)
 
-    assert "failed" in report["status"]
+    assert report["status"] == "failed"
     assert "Semantic directory is missing" in report["errors"]
 
 
@@ -139,15 +143,20 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    # Missing valid_seller_dim in semantic/
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        # Missing valid_seller_dim in semantic/
+
     report = run_integrity_gate(run_context)
 
-    assert "failed" in report["status"]
+    assert report["status"] == "failed"
     assert "Semantic file set mismatch" in report["errors"]
 
 
@@ -160,20 +169,24 @@ def test_run_integrity_gate_fails_on_loading_parquet_files(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_csv(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    valid_seller_dim.to_csv(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        valid_seller_fact.to_csv(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_csv(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     report = run_integrity_gate(run_context)
 
-    assert "failed" in report["status"]
-    assert any("parquet failed to load" in error for error in report["errors"])
+    assert report["status"] == "failed"
+    assert any("this is not a parquet file" in error for error in report["errors"])
 
 
 def test_run_integrity_gate_fails_on_empty_dataframe(tmp_path):
@@ -184,19 +197,23 @@ def test_run_integrity_gate_fails_on_empty_dataframe(tmp_path):
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    empty_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    empty_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        empty_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        empty_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     report = run_integrity_gate(run_context)
 
-    assert "failed" in report["status"]
+    assert report["status"] == "failed"
     assert any("logical table missing or empty" in error for error in report["errors"])
 
 
@@ -211,19 +228,23 @@ def test_run_integrity_gate_fails_on_missing_columns(
 
     valid_seller_fact = valid_seller_fact.drop(columns="seller_id")
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    valid_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     report = run_integrity_gate(run_context)
 
-    assert "failed" in report["status"]
+    assert report["status"] == "failed"
     assert any(
         "required column(s): ['seller_id']" in error for error in report["errors"]
     )
@@ -243,20 +264,23 @@ def test_promote_semantic_version_success(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    valid_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     report = promote_semantic_version(run_context)
 
-    assert "success" in report["status"]
-    assert "Semantic artifacts promoted successfully" in report["info"]
+    assert report["status"] == "success"
 
 
 def test_promote_semantic_version_fails_on_existing_version_directory(
@@ -268,15 +292,19 @@ def test_promote_semantic_version_fails_on_existing_version_directory(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    valid_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
     # Initial run that created the directory
     _ = promote_semantic_version(run_context)
@@ -284,7 +312,7 @@ def test_promote_semantic_version_fails_on_existing_version_directory(
     # Fails due to existing version directory on same run_id
     report = promote_semantic_version(run_context)
 
-    assert "failed" in report["status"]
+    assert report["status"] == "failed"
     assert "Version directory already exists" in report["errors"]
 
 
@@ -293,14 +321,16 @@ def test_promote_semantic_version_fails_on_making_directory(tmp_path):
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    # Force mkdir to raise
-    published_version_path = run_context.version_path / "seller_semantic"
-    published_version_path.mkdir(parents=True)
+    for module in SEMANTIC_MODULES:
+        published_version_path = run_context.version_path / module
+        published_version_path.mkdir(parents=True)
 
     report = promote_semantic_version(run_context)
 
     assert report["status"] == "failed"
-    assert any("File exists" in e or "exists" in e for e in report["errors"])
+    assert any(
+        "File exists" in error or "exists" in error for error in report["errors"]
+    )
 
 
 def test_promote_semantic_version_fails_on_copying_semantic(
@@ -313,25 +343,132 @@ def test_promote_semantic_version_fails_on_copying_semantic(
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    valid_seller_fact.to_parquet(
-        run_context.semantic_path / "seller_week_performance_fact_2023_01.parquet",
-        index=False,
-    )
-    valid_seller_dim.to_parquet(
-        run_context.semantic_path / "seller_dim_2023_01.parquet",
-        index=False,
-    )
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
 
-    # force shutil.copy2 to raise
-    def mock_copy2(*args, **kwargs):
-        raise RuntimeError("copy failure")
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
 
-    monkeypatch.setattr(shutil, "copy2", mock_copy2)
+        # force shutil.copytree to raise
+        def mock_copytree(*args, **kwargs):
+            raise RuntimeError("copy failure")
+
+        monkeypatch.setattr(shutil, "copytree", mock_copytree)
 
     report = promote_semantic_version(run_context)
 
     assert report["status"] == "failed"
-    assert any("copy failure" in e for e in report["errors"])
+    assert any("copy failure" in error for error in report["errors"])
+
+
+# ------------------------------------------------------------
+# EXECUTE PUBLISH LIFECYCLE
+# ------------------------------------------------------------
+
+
+def test_execute_publish_lifecycle_success(
+    tmp_path,
+    valid_seller_fact,
+    valid_seller_dim,
+):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
+
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
+
+    report = execute_publish_lifecycle(run_context)
+
+    assert report["status"] == "success"
+
+
+def test_execute_publish_lifecycle_fails_on_gate(
+    tmp_path,
+    valid_seller_fact,
+):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
+
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        # Missing valid_seller_dim in semantic/
+
+    report = execute_publish_lifecycle(run_context)
+
+    assert report["status"] == "failed"
+    assert "Semantic file set mismatch" in report["errors"]
+
+
+def test_execute_publish_lifecycle_fails_on_promotion(
+    tmp_path,
+    valid_seller_fact,
+    valid_seller_dim,
+):
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context.initialize_directories()
+
+    # Create existing semantics
+    for module in SEMANTIC_MODULES:
+        published_version_path = run_context.version_path / module
+        published_version_path.mkdir(parents=True)
+
+        valid_seller_fact.to_parquet(
+            published_version_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            published_version_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
+
+    for module in SEMANTIC_MODULES:
+        semantic_path = run_context.semantic_path / module
+        semantic_path.mkdir(parents=True, exist_ok=True)
+
+        valid_seller_fact.to_parquet(
+            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            index=False,
+        )
+
+        valid_seller_dim.to_parquet(
+            semantic_path / "seller_dim_2023_01.parquet",
+            index=False,
+        )
+
+    report = execute_publish_lifecycle(run_context)
+
+    assert report["status"] == "failed"
+    assert any(
+        "File exists" in error or "exists" in error for error in report["errors"]
+    )
 
 
 # =============================================================================
