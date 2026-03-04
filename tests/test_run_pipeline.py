@@ -140,22 +140,13 @@ def test_main_success(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.run_integrity_gate",
+        "data_pipeline.run_pipeline.execute_publish_lifecycle",
         lambda *a, **k: {
             "status": "success",
             "errors": [],
             "info": [],
         },  # Pass, status success
     )
-
-    # monkeypatch.setattr(
-    #     "data_pipeline.run_pipeline.promote_semantic_version",
-    #     lambda *a, **k: {
-    #         "status": "success",
-    #         "errors": [],
-    #         "info": [],
-    #     },  # Pass, status success
-    # )
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",
@@ -171,8 +162,7 @@ def test_main_success(monkeypatch, tmp_path):
     assert (fake_ctx.logs_path / "validation_post_contract.json").exists()
     assert (fake_ctx.logs_path / "assemble_report.json").exists()
     assert (fake_ctx.logs_path / "semantic_report.json").exists()
-    assert (fake_ctx.logs_path / "publish_integrity_report.json").exists()
-    assert (fake_ctx.logs_path / "publish_promotion_report.json").exists()
+    assert (fake_ctx.logs_path / "publish_report.json").exists()
 
 
 # =============================================================================

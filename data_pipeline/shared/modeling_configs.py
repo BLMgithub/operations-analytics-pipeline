@@ -7,7 +7,7 @@
 # ------------------------------------------------------------
 
 # Assemble events enforced schema and dtypes
-ASSEMBLE_ENFORCED_SCHEMA = [
+ASSEMBLE_SCHEMA = [
     "order_id",
     "order_revenue",
     "seller_id",
@@ -25,7 +25,7 @@ ASSEMBLE_ENFORCED_SCHEMA = [
     "run_id",
 ]
 
-ASSEMBLE_ENFORCED_DTYPES = {
+ASSEMBLE_DTYPES = {
     "order_id": "string",
     "order_revenue": "float64",
     "seller_id": "string",
@@ -48,14 +48,14 @@ ASSEMBLE_ENFORCED_DTYPES = {
 
 
 # Seller dimension enforced schema and dtypes
-SELLER_DIM_ENFORCED_SCHEMA = [
+SELLER_DIM_SCHEMA = [
     "seller_id",
     "first_order_date",
     "first_order_year_week",
     "run_id",
 ]
 
-SELLER_DIM_ENFORCED_DTYPES = {
+SELLER_DIM_DTYPES = {
     "seller_id": "string",
     "first_order_date": "datetime64[ns]",
     "first_order_year_week": "string",
@@ -64,7 +64,7 @@ SELLER_DIM_ENFORCED_DTYPES = {
 
 
 # Seller Facts enforced schema and dtypes
-SELLER_FACT_ENFORCED_SCHEMA = [
+SELLER_FACT_SCHEMA = [
     "seller_id",
     "order_year_week",
     "week_start_date",
@@ -80,7 +80,7 @@ SELLER_FACT_ENFORCED_SCHEMA = [
     "weekly_avg_approval_lag",
 ]
 
-SELLER_FACT_ENFORCED_DTYPES = {
+SELLER_FACT_DTYPES = {
     "seller_id": "string",
     "order_year_week": "string",
     "week_start_date": "datetime64[ns]",
@@ -95,3 +95,18 @@ SELLER_FACT_ENFORCED_DTYPES = {
     "weekly_total_delivery_delay": "int64",
     "weekly_avg_approval_lag": "float64",
 }
+
+# Customer Dimension and dtypes
+CUSTOMER_DIM_SCHEMA = [
+    "",
+]
+
+
+CUSTOMER_DIM_DTYPES = {
+    "": "",
+}
+
+# Customer Fact and dtypes
+
+
+# Product Fact and dtypes

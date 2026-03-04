@@ -11,8 +11,8 @@ import pandas as pd
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.modeling_configs import (
-    ASSEMBLE_ENFORCED_SCHEMA,
-    ASSEMBLE_ENFORCED_DTYPES,
+    ASSEMBLE_SCHEMA,
+    ASSEMBLE_DTYPES,
 )
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
@@ -140,12 +140,12 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
     - Resets index to produce a clean output frame
     """
 
-    missing_cols = set(ASSEMBLE_ENFORCED_SCHEMA) - set(df.columns)
+    missing_cols = set(ASSEMBLE_SCHEMA) - set(df.columns)
     if missing_cols:
         raise RuntimeError(f"missing required columns: {sorted(missing_cols)}")
 
-    df_contract = df[ASSEMBLE_ENFORCED_SCHEMA].copy()
-    df_contract = df_contract.astype(ASSEMBLE_ENFORCED_DTYPES)
+    df_contract = df[ASSEMBLE_SCHEMA].copy()
+    df_contract = df_contract.astype(ASSEMBLE_DTYPES)
     df_contract = df_contract.sort_values("order_id").reset_index(drop=True)
 
     return df_contract

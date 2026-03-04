@@ -10,8 +10,8 @@ from data_pipeline.stages.build_bi_semantic_layer import (
     init_report,
     log_error,
     log_info,
-    seller_weekly_semantic,
-    freeze_seller_semantic,
+    SEMANTIC_MODULES,
+    build_seller_semantic,
     build_semantic_layer,
 )
 
@@ -141,16 +141,19 @@ def test_log_info_appends_only_to_info(empty_report):
 
 def test_seller_semantic_model_grain_preserved_success(valid_assembled_df):
 
-    seller_fact, seller_dim = seller_weekly_semantic(valid_assembled_df)
+    seller_semantic = build_seller_semantic(valid_assembled_df)
     expected = (
         valid_assembled_df[["seller_id", "order_year_week"]].drop_duplicates().shape[0]
     )
 
     # Fact preserved grain
-    assert len(seller_fact) == expected
+    assert len(seller_semantic["seller_week_performance_fact"]) == expected
 
     # Dimension preserved grain
-    assert len(seller_dim) == valid_assembled_df["seller_id"].drop_duplicates().shape[0]
+    assert (
+        len(seller_semantic["seller_dim"])
+        == valid_assembled_df["seller_id"].drop_duplicates().shape[0]
+    )
 
 
 def test_seller_semantic_fails_on_multiple_run_ids(valid_assembled_df):
@@ -159,115 +162,7 @@ def test_seller_semantic_fails_on_multiple_run_ids(valid_assembled_df):
     broken_df.loc[1, "run_id"] = "another_run"
 
     with pytest.raises(RuntimeError):
-        seller_weekly_semantic(broken_df)
-
-
-def test_freeze_seller_semantic_fact_success(valid_seller_fact):
-
-    result_fact = freeze_seller_semantic(valid_seller_fact, "fact")
-
-    expected_dtypes = {
-        "seller_id": "string",
-        "order_year_week": "string",
-        "week_start_date": "datetime64[ns]",
-        "run_id": "string",
-        "weekly_order_count": "int64",
-        "weekly_delivered_orders": "int64",
-        "weekly_cancelled_orders": "int64",
-        "weekly_revenue": "float64",
-        "weekly_avg_lead_time": "float64",
-        "weekly_total_lead_time": "int64",
-        "weekly_avg_delivery_delay": "float64",
-        "weekly_total_delivery_delay": "int64",
-        "weekly_avg_approval_lag": "float64",
-    }
-
-    assert list(result_fact.columns) == [
-        "seller_id",
-        "order_year_week",
-        "week_start_date",
-        "run_id",
-        "weekly_order_count",
-        "weekly_delivered_orders",
-        "weekly_cancelled_orders",
-        "weekly_revenue",
-        "weekly_avg_lead_time",
-        "weekly_total_lead_time",
-        "weekly_avg_delivery_delay",
-        "weekly_total_delivery_delay",
-        "weekly_avg_approval_lag",
-    ]
-
-    for col, correct_dtypes in expected_dtypes.items():
-        assert str(result_fact[col].dtype) == correct_dtypes
-
-    assert result_fact.equals(
-        result_fact.sort_values(["seller_id", "order_year_week"]).reset_index(drop=True)
-    )
-
-    assert len(result_fact) == len(valid_seller_fact)
-
-
-def test_freeze_seller_semantic_dimension_success(valid_seller_dim):
-
-    result_dim = freeze_seller_semantic(valid_seller_dim, "dim")
-
-    assert list(result_dim.columns) == [
-        "seller_id",
-        "first_order_date",
-        "first_order_year_week",
-        "run_id",
-    ]
-
-    assert result_dim["seller_id"].dtype == "string"
-    assert result_dim["first_order_date"].dtype == "datetime64[ns]"
-    assert result_dim["first_order_year_week"].dtype == "string"
-    assert result_dim["run_id"].dtype == "string"
-
-    assert len(result_dim) == len(valid_seller_dim)
-
-
-def test_freeze_seller_semantic_fact_fails_on_missing_column(valid_seller_fact):
-
-    broken_seller_fact = valid_seller_fact.copy()
-    broken_seller_fact.drop(columns="weekly_order_count", inplace=True)
-
-    with pytest.raises(RuntimeError):
-        freeze_seller_semantic(broken_seller_fact, "fact")
-
-
-def test_freeze_seller_semantic_dimension_fails_on_missing_column(valid_seller_dim):
-
-    broken_seller_dim = valid_seller_dim.copy()
-    broken_seller_dim.drop(columns="first_order_year_week", inplace=True)
-
-    with pytest.raises(RuntimeError):
-        freeze_seller_semantic(broken_seller_dim, "dim")
-
-
-def test_freeze_seller_semantic_fact_fails_on_duplictes(valid_seller_fact):
-
-    broken_seller_fact = valid_seller_fact.copy()
-    broken_seller_fact.loc[1, "seller_id"] = "seller1"
-    broken_seller_fact.loc[1, "order_year_week"] = "2023-W01"
-
-    with pytest.raises(RuntimeError):
-        freeze_seller_semantic(broken_seller_fact, "fact")
-
-
-def test_freeze_seller_semantic_fact_dimension_on_duplictes(valid_seller_dim):
-
-    broken_seller_dim = valid_seller_dim.copy()
-    broken_seller_dim.loc[1, "seller_id"] = "seller1"
-
-    with pytest.raises(RuntimeError):
-        freeze_seller_semantic(broken_seller_dim, "dim")
-
-
-def test_freeze_seller_semantic_fails_on_table_type(valid_seller_fact):
-
-    with pytest.raises(ValueError):
-        freeze_seller_semantic(valid_seller_fact, "invalid_param")  # type: ignore
+        build_seller_semantic(broken_df)
 
 
 # =============================================================================
@@ -286,15 +181,21 @@ def test_build_semantic_layer_success(tmp_path, valid_assembled_df):
 
     report = build_semantic_layer(run_context)
 
-    output_path_seller = (
-        run_context.semantic_path / "seller_week_performance_fact_dumm_y_.parquet"
-    )
+    for module in SEMANTIC_MODULES:
 
-    output_path_dim = run_context.semantic_path / "seller_dim_dumm_y_.parquet"
+        output_path_seller = (
+            run_context.semantic_path
+            / module
+            / "seller_week_performance_fact_dumm_y_.parquet"
+        )
 
-    assert report["status"] == "success"
-    assert output_path_seller.exists()
-    assert output_path_dim.exists()
+        output_path_dim = (
+            run_context.semantic_path / module / "seller_dim_dumm_y_.parquet"
+        )
+
+        assert report["status"] == "success"
+        assert output_path_seller.exists()
+        assert output_path_dim.exists()
 
 
 def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df):
