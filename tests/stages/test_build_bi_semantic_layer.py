@@ -22,6 +22,32 @@ def empty_report():
 
 
 @pytest.fixture
+def valid_customers_df():
+    return pd.DataFrame(
+        {
+            "customer_id": pd.Series(["customer1", "customer2"], dtype="string"),
+            "customer_zip_code_prefix": pd.Series(["zip1", "zip2"], dtype="string"),
+            "customer_city": pd.Series(["city1", "city2"], dtype="string"),
+            "customer_state": pd.Series(["state1", "state2"], dtype="string"),
+        }
+    )
+
+
+@pytest.fixture
+def valid_products_df():
+    return pd.DataFrame(
+        {
+            "product_id": pd.Series(["prod1", "prod2"], dtype="string"),
+            "product_category_name": pd.Series(["categ1", "categ2"], dtype="string"),
+            "product_weight_g": pd.Series([491, 500], dtype="float64"),
+            "product_length_cm": pd.Series([19.0, 20.0], dtype="float64"),
+            "product_height_cm": pd.Series([12.0, 13.0], dtype="float64"),
+            "product_width_cm": pd.Series([16.0, 15.0], dtype="float64"),
+        }
+    )
+
+
+@pytest.fixture
 def valid_assembled_df():
     return pd.DataFrame(
         {
@@ -30,6 +56,7 @@ def valid_assembled_df():
                 dtype="string",
             ),
             "seller_id": pd.Series(["seller1", "seller2"], dtype="string"),
+            "customer_id": pd.Series(["customer1", "customer2"], dtype="string"),
             "order_revenue": pd.Series([12.34, 56.78], dtype="float64"),
             "product_id": pd.Series(["prod1", "prod2"], dtype="string"),
             "order_status": pd.Series(["delivered", "cancelled"], dtype="string"),
@@ -139,15 +166,17 @@ def test_log_info_appends_only_to_info(empty_report):
 # =============================================================================
 
 
-def test_seller_semantic_model_grain_preserved_success(valid_assembled_df):
+def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled_df):
 
-    seller_semantic = build_seller_semantic(valid_assembled_df)
+    run_context = RunContext.create(base_path=tmp_path)
+
+    seller_semantic = build_seller_semantic(valid_assembled_df, run_context)
     expected = (
         valid_assembled_df[["seller_id", "order_year_week"]].drop_duplicates().shape[0]
     )
 
     # Fact preserved grain
-    assert len(seller_semantic["seller_week_performance_fact"]) == expected
+    assert len(seller_semantic["seller_weekly_fact"]) == expected
 
     # Dimension preserved grain
     assert (
@@ -156,13 +185,15 @@ def test_seller_semantic_model_grain_preserved_success(valid_assembled_df):
     )
 
 
-def test_seller_semantic_fails_on_multiple_run_ids(valid_assembled_df):
+def test_seller_semantic_fails_on_multiple_run_ids(tmp_path, valid_assembled_df):
+
+    run_context = RunContext.create(base_path=tmp_path)
 
     broken_df = valid_assembled_df.copy()
     broken_df.loc[1, "run_id"] = "another_run"
 
     with pytest.raises(RuntimeError):
-        build_seller_semantic(broken_df)
+        build_seller_semantic(broken_df, run_context)
 
 
 # =============================================================================
@@ -170,7 +201,12 @@ def test_seller_semantic_fails_on_multiple_run_ids(valid_assembled_df):
 # =============================================================================
 
 
-def test_build_semantic_layer_success(tmp_path, valid_assembled_df):
+def test_build_semantic_layer_success(
+    tmp_path,
+    valid_assembled_df,
+    valid_customers_df,
+    valid_products_df,
+):
 
     run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
@@ -179,23 +215,27 @@ def test_build_semantic_layer_success(tmp_path, valid_assembled_df):
         run_context.assembled_path / "assembled_events_2023_01.parquet"
     )
 
+    valid_customers_df.to_parquet(
+        run_context.contracted_path / "df_customers_contracted.parquet"
+    )
+
+    valid_products_df.to_parquet(
+        run_context.contracted_path / "df_products_contracted.parquet"
+    )
+
     report = build_semantic_layer(run_context)
 
-    for module in SEMANTIC_MODULES:
+    for module_name, module in SEMANTIC_MODULES.items():
+        for table_name in module["tables"]:
 
-        output_path_seller = (
-            run_context.semantic_path
-            / module
-            / "seller_week_performance_fact_dumm_y_.parquet"
-        )
+            outputs_path = (
+                run_context.semantic_path
+                / module_name
+                / f"{table_name}_dumm_y_.parquet"
+            )
 
-        output_path_dim = (
-            run_context.semantic_path / module / "seller_dim_dumm_y_.parquet"
-        )
-
-        assert report["status"] == "success"
-        assert output_path_seller.exists()
-        assert output_path_dim.exists()
+            assert report["status"] == "success"
+            assert outputs_path.exists()
 
 
 def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df):
@@ -213,7 +253,11 @@ def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    assert "Multiple run_ids detected" in report["errors"]
+    assert report["failed_module"] == "seller_semantic"
+
+    module_error = report["modules"]["seller_semantic"]["errors"]
+
+    assert any("Multiple run_ids detected" in error for error in module_error)
 
 
 def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled_df):
@@ -231,7 +275,30 @@ def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    assert any("approval_lag_days" in error for error in report["errors"])
+    assert report["failed_module"] == "seller_semantic"
+
+    module_error = report["modules"]["seller_semantic"]["errors"]
+
+    assert any("approval_lag_days" in error for error in module_error)
+
+
+def test_build_semantic_layer_fails_on_missing_or_empty_df(tmp_path):
+
+    empty_df = pd.DataFrame()
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context.initialize_directories()
+
+    empty_df.to_parquet(run_context.assembled_path / "assembled_events_2023_01.parquet")
+
+    report = build_semantic_layer(run_context)
+
+    assert report["status"] == "failed"
+    assert report["failed_step"] == "load_tables"
+
+    load_error = report["steps"]["load_tables"]["errors"]
+
+    assert any("missing or empty" in error for error in load_error)
 
 
 # =============================================================================

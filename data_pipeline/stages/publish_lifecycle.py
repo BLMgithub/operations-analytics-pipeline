@@ -93,7 +93,7 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
         actual_files = {file.name for file in module_path.glob("*.parquet")}
 
         if actual_files != expected_files:
-            log_error("Semantic file set mismatch", report)
+            log_error(f"Semantic file set mismatch on {module_name}", report)
             report["status"] = "failed"
 
             return report
@@ -214,9 +214,14 @@ def activate_published_version(run_context: RunContext) -> Dict:
 
     tmp_path = latest_path.with_suffix(".tmp")
 
+    run_dt = dt.strptime(run_context.run_id[:15], "%Y%m%dT%H%M%S")
+
     payload = {
         "run_id": run_context.run_id,
         "version": f"v{run_context.run_id}",
+        "run_year": run_dt.year,
+        "run_month": run_dt.month,
+        "run_week_of_month": (run_dt.day - 1) // 7 + 1,
         "published_at": dt.utcnow().isoformat(),
     }
 
@@ -238,7 +243,7 @@ def activate_published_version(run_context: RunContext) -> Dict:
 
 
 # ------------------------------------------------------------
-# EXECUTE PUBLISH LIFECYCLE
+# RUN PUBLISH LIFECYCLE
 # ------------------------------------------------------------
 
 
@@ -247,28 +252,40 @@ def execute_publish_lifecycle(run_context: RunContext) -> Dict:
     docstring.
     """
 
-    report = init_report()
+    report = {
+        "status": "success",
+        "steps": {},
+    }
+
+    def fail_step(step_name):
+        report["status"] = "failed"
+        report["failed_step"] = step_name
+
+        return report
 
     validate_semantic = run_integrity_gate(run_context)
+    report["steps"]["integrity_gate"] = validate_semantic
 
     if validate_semantic["status"] == "failed":
-        return validate_semantic
+        return fail_step("integrity_gate")
 
-    log_info("Pre-publishing validation passed", report)
+    log_info("Pre-publishing validation passed", validate_semantic)
 
     promote_semantic = promote_semantic_version(run_context)
+    report["steps"]["promotion"] = promote_semantic
 
     if promote_semantic["status"] == "failed":
-        return promote_semantic
+        return fail_step("promotion")
 
-    log_info("Semantic artifacts promoted successfully", report)
+    log_info("Semantic artifacts promoted successfully", promote_semantic)
 
-    semantic_activation = activate_published_version(run_context)
+    published_activation = activate_published_version(run_context)
+    report["steps"]["activation"] = published_activation
 
-    if semantic_activation["status"] == "failed":
-        return semantic_activation
+    if published_activation["status"] == "failed":
+        return fail_step("activation")
 
-    log_info("Atomic pointer swap successful", report)
+    log_info("Atomic pointer swap successful", published_activation)
 
     return report
 

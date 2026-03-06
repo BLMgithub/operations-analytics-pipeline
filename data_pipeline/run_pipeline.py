@@ -55,10 +55,15 @@ def initiliaze_metadata(run_context: RunContext) -> None:
     establish lifecycle tracking and publish eligibility state.
     """
 
+    run_dt = dt.strptime(run_context.run_id[:15], "%Y%m%dT%H%M%S")
+
     payload = {
         "run_id": run_context.run_id,
         "status": "RUNNING",
         "started_at": dt.utcnow().isoformat(),
+        "run_year": run_dt.year,
+        "run_month": run_dt.month,
+        "run_week_of_month": (run_dt.day - 1) // 7 + 1,
         "completed_at": None,
         "published": False,
     }
@@ -66,7 +71,7 @@ def initiliaze_metadata(run_context: RunContext) -> None:
     persist_json(run_context.metadata_path, payload)
 
 
-def finalize_run(run_context: RunContext, status: str) -> None:
+def finalize_metadata(run_context: RunContext, status: str) -> None:
     """
     Run metadata finalizer.
 
@@ -146,7 +151,7 @@ def main() -> None:
 
     # Early exit for structural errors else apply contract
     if validation_initial["errors"]:
-        finalize_run(run_context, "FAILED")
+        finalize_metadata(run_context, "FAILED")
         sys.exit(1)
 
     report_contract = []
@@ -191,7 +196,7 @@ def main() -> None:
 
     # Intervention: Either manual fixing or escalate the data to source owner
     if validation_post_contract["errors"] or validation_post_contract["warnings"]:
-        finalize_run(run_context, "FAILED")
+        finalize_metadata(run_context, "FAILED")
         sys.exit(1)
 
     # Assemble event table
@@ -206,7 +211,7 @@ def main() -> None:
     )
 
     if assemble["status"] == "failed":
-        finalize_run(run_context, "FAILED")
+        finalize_metadata(run_context, "FAILED")
         sys.exit(1)
 
     # Semantic modeling
@@ -221,7 +226,7 @@ def main() -> None:
     )
 
     if semantic["status"] == "failed":
-        finalize_run(run_context, "FAILED")
+        finalize_metadata(run_context, "FAILED")
         sys.exit(1)
 
     # Pre-publish semantic validation
@@ -236,10 +241,10 @@ def main() -> None:
     )
 
     if publish["status"] == "failed":
-        finalize_run(run_context, "FAILED")
+        finalize_metadata(run_context, "FAILED")
         sys.exit(1)
 
-    finalize_run(run_context, "SUCCESS")
+    finalize_metadata(run_context, "SUCCESS")
     sys.exit(0)
 
 

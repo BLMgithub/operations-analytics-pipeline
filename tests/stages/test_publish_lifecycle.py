@@ -69,6 +69,89 @@ def valid_seller_dim():
     )
 
 
+@pytest.fixture
+def valid_customer_fact():
+    return pd.DataFrame(
+        {
+            "customer_id": pd.Series(
+                ["customer1", "customer"],
+                dtype="string",
+            ),
+            "order_year_week": pd.Series(
+                ["2023-W01", "2023-W02"],
+                dtype="string",
+            ),
+            "week_start_date": pd.Series(
+                ["2023-01-02 09:00:00", "2023-01-04 15:00:00"],
+                dtype="datetime64[ns]",
+            ),
+            "run_id": pd.Series(["run_1", "run_1"], dtype="string"),
+            "weekly_order_count": pd.Series([12, 34], dtype="int64"),
+            "weekly_delivered_orders": pd.Series([5, 6], dtype="int64"),
+            "weekly_cancelled_orders": pd.Series([7, 8], dtype="int64"),
+            "weekly_revenue": pd.Series([12.3, 45.6], dtype="float64"),
+            "weekly_avg_lead_time": pd.Series([5.34, 6.45], dtype="float64"),
+            "weekly_total_lead_time": pd.Series([5, 6], dtype="int64"),
+            "weekly_avg_delivery_delay": pd.Series([54.50, 67.89], dtype="float64"),
+            "weekly_total_delivery_delay": pd.Series([10, 11], dtype="int64"),
+            "weekly_avg_approval_lag": pd.Series([12.3, 14.5], dtype="float64"),
+        }
+    )
+
+
+@pytest.fixture
+def valid_customer_dim():
+    return pd.DataFrame(
+        {
+            "customer_id": pd.Series(["customer1", "customer2"], dtype="string"),
+            "customer_state": pd.Series(["state1", "state2"], dtype="string"),
+            "run_id": pd.Series(["run_1", "run_1"], dtype="string"),
+        }
+    )
+
+
+@pytest.fixture
+def valid_product_fact():
+    return pd.DataFrame(
+        {
+            "product_id": pd.Series(
+                ["product1", "product2"],
+                dtype="string",
+            ),
+            "order_year_week": pd.Series(
+                ["2023-W01", "2023-W02"],
+                dtype="string",
+            ),
+            "week_start_date": pd.Series(
+                ["2023-01-02 09:00:00", "2023-01-04 15:00:00"],
+                dtype="datetime64[ns]",
+            ),
+            "run_id": pd.Series(["run_1", "run_1"], dtype="string"),
+            "weekly_order_count": pd.Series([12, 34], dtype="int64"),
+            "weekly_delivered_orders": pd.Series([5, 6], dtype="int64"),
+            "weekly_cancelled_orders": pd.Series([7, 8], dtype="int64"),
+            "weekly_revenue": pd.Series([12.3, 45.6], dtype="float64"),
+            "weekly_avg_lead_time": pd.Series([5.34, 6.45], dtype="float64"),
+            "weekly_total_lead_time": pd.Series([5, 6], dtype="int64"),
+            "weekly_avg_delivery_delay": pd.Series([54.50, 67.89], dtype="float64"),
+            "weekly_total_delivery_delay": pd.Series([10, 11], dtype="int64"),
+            "weekly_avg_approval_lag": pd.Series([12.3, 14.5], dtype="float64"),
+        }
+    )
+
+
+@pytest.fixture
+def valid_product_dim():
+    return pd.DataFrame(
+        {
+            "product_id": pd.Series(["prod1", "prod2"], dtype="string"),
+            "product_category_name": pd.Series(["categ1", "categ2"], dtype="string"),
+            "product_weight_g": pd.Series([491, 500], dtype="float64"),
+            "run_id": pd.Series(["run_1", "run_1"], dtype="string"),
+        }
+    )
+
+
 # ------------------------------------------------------------
 # # REPORTING & LOGS
 # ------------------------------------------------------------
@@ -102,24 +185,36 @@ def test_run_integrity_gate_success(
     tmp_path,
     valid_seller_fact,
     valid_seller_dim,
+    valid_customer_fact,
+    valid_customer_dim,
+    valid_product_fact,
+    valid_product_dim,
 ):
 
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    for module in SEMANTIC_MODULES:
-        semantic_path = run_context.semantic_path / module
-        semantic_path.mkdir(parents=True, exist_ok=True)
+    # Match expected table names for each module
+    df_map = {
+        "seller_weekly_fact": valid_seller_fact,
+        "seller_dim": valid_seller_dim,
+        "customer_weekly_fact": valid_customer_fact,
+        "customer_dim": valid_customer_dim,
+        "product_weekly_fact": valid_product_fact,
+        "product_dim": valid_product_dim,
+    }
 
-        valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
-            index=False,
-        )
+    for module_name, module in SEMANTIC_MODULES.items():
+        module_path = run_context.semantic_path / module_name
+        module_path.mkdir(parents=True, exist_ok=True)
 
-        valid_seller_dim.to_parquet(
-            semantic_path / "seller_dim_2023_01.parquet",
-            index=False,
-        )
+        for table_name in module["tables"]:
+            df = df_map[table_name]
+
+            df.to_parquet(
+                module_path / f"{table_name}_2023_01.parquet",
+                index=False,
+            )
 
     report = run_integrity_gate(run_context)
 
@@ -148,7 +243,7 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -157,7 +252,7 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     report = run_integrity_gate(run_context)
 
     assert report["status"] == "failed"
-    assert "Semantic file set mismatch" in report["errors"]
+    assert any("Semantic file set mismatch" in error for error in report["errors"])
 
 
 def test_run_integrity_gate_fails_on_loading_parquet_files(
@@ -174,7 +269,7 @@ def test_run_integrity_gate_fails_on_loading_parquet_files(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_csv(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -202,7 +297,7 @@ def test_run_integrity_gate_fails_on_empty_dataframe(tmp_path):
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         empty_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -233,7 +328,7 @@ def test_run_integrity_gate_fails_on_missing_columns(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -269,7 +364,7 @@ def test_promote_semantic_version_success(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -297,7 +392,7 @@ def test_promote_semantic_version_fails_on_existing_version_directory(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -348,7 +443,7 @@ def test_promote_semantic_version_fails_on_copying_semantic(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
         valid_seller_dim.to_parquet(
@@ -377,24 +472,35 @@ def test_execute_publish_lifecycle_success(
     tmp_path,
     valid_seller_fact,
     valid_seller_dim,
+    valid_customer_fact,
+    valid_customer_dim,
+    valid_product_fact,
+    valid_product_dim,
 ):
 
     run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
-    for module in SEMANTIC_MODULES:
-        semantic_path = run_context.semantic_path / module
-        semantic_path.mkdir(parents=True, exist_ok=True)
+    df_map = {
+        "seller_weekly_fact": valid_seller_fact,
+        "seller_dim": valid_seller_dim,
+        "customer_weekly_fact": valid_customer_fact,
+        "customer_dim": valid_customer_dim,
+        "product_weekly_fact": valid_product_fact,
+        "product_dim": valid_product_dim,
+    }
 
-        valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
-            index=False,
-        )
+    for module_name, module in SEMANTIC_MODULES.items():
+        module_path = run_context.semantic_path / module_name
+        module_path.mkdir(parents=True, exist_ok=True)
 
-        valid_seller_dim.to_parquet(
-            semantic_path / "seller_dim_2023_01.parquet",
-            index=False,
-        )
+        for table_name in module["tables"]:
+            df = df_map[table_name]
+
+            df.to_parquet(
+                module_path / f"{table_name}_2023_01.parquet",
+                index=False,
+            )
 
     report = execute_publish_lifecycle(run_context)
 
@@ -414,7 +520,7 @@ def test_execute_publish_lifecycle_fails_on_gate(
         semantic_path.mkdir(parents=True, exist_ok=True)
 
         valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
+            semantic_path / "seller_weekly_fact_2023_01.parquet",
             index=False,
         )
 
@@ -423,52 +529,11 @@ def test_execute_publish_lifecycle_fails_on_gate(
     report = execute_publish_lifecycle(run_context)
 
     assert report["status"] == "failed"
-    assert "Semantic file set mismatch" in report["errors"]
+    assert report["failed_step"] == "integrity_gate"
 
+    step_errors = report["steps"]["integrity_gate"]["errors"]
 
-def test_execute_publish_lifecycle_fails_on_promotion(
-    tmp_path,
-    valid_seller_fact,
-    valid_seller_dim,
-):
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
-    run_context.initialize_directories()
-
-    # Create existing semantics
-    for module in SEMANTIC_MODULES:
-        published_version_path = run_context.version_path / module
-        published_version_path.mkdir(parents=True)
-
-        valid_seller_fact.to_parquet(
-            published_version_path / "seller_week_performance_fact_2023_01.parquet",
-            index=False,
-        )
-
-        valid_seller_dim.to_parquet(
-            published_version_path / "seller_dim_2023_01.parquet",
-            index=False,
-        )
-
-    for module in SEMANTIC_MODULES:
-        semantic_path = run_context.semantic_path / module
-        semantic_path.mkdir(parents=True, exist_ok=True)
-
-        valid_seller_fact.to_parquet(
-            semantic_path / "seller_week_performance_fact_2023_01.parquet",
-            index=False,
-        )
-
-        valid_seller_dim.to_parquet(
-            semantic_path / "seller_dim_2023_01.parquet",
-            index=False,
-        )
-
-    report = execute_publish_lifecycle(run_context)
-
-    assert report["status"] == "failed"
-    assert any(
-        "File exists" in error or "exists" in error for error in report["errors"]
-    )
+    assert any("Semantic file set mismatch" in error for error in step_errors)
 
 
 # =============================================================================

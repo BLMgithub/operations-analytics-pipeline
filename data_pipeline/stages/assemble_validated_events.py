@@ -10,10 +10,7 @@
 import pandas as pd
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.modeling_configs import (
-    ASSEMBLE_SCHEMA,
-    ASSEMBLE_DTYPES,
-)
+from data_pipeline.shared.modeling_configs import ASSEMBLE_SCHEMA, ASSEMBLE_DTYPES
 from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
 
 EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
@@ -171,45 +168,92 @@ def assemble_events(run_context: RunContext) -> Dict:
     - One row per order_id (hard fail on violation)
     """
 
-    report = init_report()
-    report["status"] = "success"
+    report = {
+        "status": "success",
+        "steps": {
+            "load_tables": init_report(),
+            "merge_events": init_report(),
+            "derive_fields": init_report(),
+            "freeze_schema": init_report(),
+            "export": init_report(),
+        },
+    }
 
-    def info(msg):
-        log_info(msg, report)
+    def fail_step(step_name):
+        report["status"] = "failed"
+        report["failed_step"] = step_name
 
-    def error(msg):
-        log_error(msg, report)
+        return report
 
     contracted_path = run_context.contracted_path
     tables = {}
+
+    # Load Tables
+    load_report = report["steps"]["load_tables"]
 
     for table_name in EVENT_TABLES:
 
         df = load_logical_table(
             contracted_path,
             table_name,
-            log_info=info,
-            log_error=error,
+            log_info=lambda msg: log_info(msg, load_report),
+            log_error=lambda msg: log_error(msg, load_report),
         )
 
         if df is None:
-            error(f"{table_name}: dataset is empty")
-            report["status"] = "failed"
+            log_error(f"{table_name}: dataset is empty", load_report)
+            load_report["status"] = "failed"
 
-            return report
+            return fail_step("load_tables")
 
         tables[table_name] = df
 
+    log_info("Tables loaded successfully", load_report)
+
+    # Merge dataframes
+    merge_report = report["steps"]["merge_events"]
+
     try:
         df_merged = merge_data(tables)
+
+    except Exception as e:
+        log_error(str(e), merge_report)
+        merge_report["status"] = "failed"
+
+        return fail_step("merge_events")
+
+    log_info(f"Merge completed successfully ({len(df_merged)} rows)", merge_report)
+
+    # Derived columns
+    derive_report = report["steps"]["derive_fields"]
+
+    try:
         df_assembled = derive_fields(df_merged, run_context.run_id)
+
+    except Exception as e:
+        log_error(str(e), derive_report)
+        derive_report["status"] = "failed"
+
+        return fail_step("derive_fields")
+
+    log_info("Fields derived successfully", derive_report)
+
+    # Freeze Schema
+    freeze_report = report["steps"]["freeze_schema"]
+
+    try:
         df_contract = freeze_schema(df_assembled)
 
     except Exception as e:
-        error(str(e))
-        report["status"] = "failed"
+        log_error(str(e), freeze_report)
+        freeze_report["status"] = "failed"
 
-        return report
+        return fail_step("freeze_schema")
+
+    log_info("Schema freeze completed successfully", freeze_report)
+
+    # Table Export
+    export_report = report["steps"]["export"]
 
     year = run_context.run_id[:4]
     month = run_context.run_id[4:6]
@@ -219,12 +263,16 @@ def assemble_events(run_context: RunContext) -> Dict:
     )
 
     if not export_file(df_contract, output_path):
-        error("Export failed")
-        report["status"] = "failed"
+        log_error("Export failed", export_report)
+        export_report["status"] = "failed"
 
-    info(
-        f"Export success: assembled_events_{year}_{month}.parquet ({len(df_contract)} rows)"
+        return fail_step("export")
+
+    log_info(
+        f"Export success: assembled_events_{year}_{month}.parquet ({len(df_contract)} rows)",
+        export_report,
     )
+
     return report
 
 

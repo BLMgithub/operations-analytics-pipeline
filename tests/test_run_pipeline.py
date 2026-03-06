@@ -9,48 +9,53 @@ import pytest
 
 def test_snapshot_raw_raises_when_source_missing(tmp_path):
 
-    ctx = RunContext.create(base_path=tmp_path, run_id="x")
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
 
     with pytest.raises(FileNotFoundError):
-        snapshot_raw(ctx)
+        snapshot_raw(run_context)
 
 
-def test_main_exits_on_validation_1_errors(monkeypatch, tmp_path):
+def test_main_fails_on_initial_validation(monkeypatch, tmp_path):
 
-    fake_ctx = RunContext.create(base_path=tmp_path, run_id="x")
-
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.RunContext.create",
-        lambda: fake_ctx,
-    )
-
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.apply_validation",
-        lambda *args, **kwargs: {
-            "errors": ["boom"],  # force to fail on validation_1
-            "warnings": [],
-        },
-    )
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",
         lambda *_: None,
     )
 
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.RunContext.create",
+        lambda: run_context,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_validation",
+        lambda *args, **kwargs: {
+            "errors": ["boom"],  # force to fail on initial validation
+            "warnings": [],
+        },
+    )
+
     with pytest.raises(SystemExit) as e:
         main()
 
     assert e.value.code == 1
-    assert (fake_ctx.logs_path / "validation_initial.json").exists()
+    assert (run_context.logs_path / "validation_initial.json").exists()
 
 
-def test_main_exits_on_validation_2_issues(monkeypatch, tmp_path):
+def test_main_fails_on_post_contract_validation(monkeypatch, tmp_path):
 
-    fake_ctx = RunContext.create(base_path=tmp_path, run_id="x")
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.snapshot_raw",
+        lambda *_: None,
+    )
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.RunContext.create",
-        lambda: fake_ctx,
+        lambda: run_context,
     )
 
     monkeypatch.setattr(
@@ -64,8 +69,11 @@ def test_main_exits_on_validation_2_issues(monkeypatch, tmp_path):
     def fake_validation(*args, **kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
-            return {"errors": [], "warnings": []}  # force to pass on validation_1
-        return {"errors": [], "warnings": ["warn"]}  # fail on validation_2
+            return {"errors": [], "warnings": []}
+        return {
+            "errors": [],
+            "warnings": ["warn"],
+        }  # force to pass on post contract validation
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.apply_validation",
@@ -77,30 +85,208 @@ def test_main_exits_on_validation_2_issues(monkeypatch, tmp_path):
         lambda *a, **k: ({}, set()),
     )
 
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.assemble_events",
-        lambda *a, **k: {"status": "success", "error": [], "info": []},
-    )
+    with pytest.raises(SystemExit) as e:
+        main()
+
+    assert e.value.code == 1
+    assert (run_context.logs_path / "validation_post_contract.json").exists()
+
+
+def test_main_fails_on_assemble_events(monkeypatch, tmp_path):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.snapshot_raw",
         lambda *_: None,
     )
 
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.RunContext.create",
+        lambda: run_context,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.TABLE_CONFIG",
+        {"dummy": {}},
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_validation",
+        lambda *a, **k: {
+            "errors": [],
+            "warnings": [],
+        },  # Pass all validations
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_contract",
+        lambda *a, **k: ({}, set()),
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.assemble_events",
+        lambda *a, **k: {
+            "status": "failed",
+            "error": ["boom"],
+            "info": [],
+        },  # Force to fail on assemble events
+    )
+
     with pytest.raises(SystemExit) as e:
         main()
 
     assert e.value.code == 1
-    assert (fake_ctx.logs_path / "validation_post_contract.json").exists()
+    assert (run_context.logs_path / "validation_initial.json").exists()
+    assert (run_context.logs_path / "contract_report.json").exists()
+    assert (run_context.logs_path / "validation_post_contract.json").exists()
+    assert (run_context.logs_path / "assemble_report.json").exists()
+
+
+def test_main_fails_on_build_semantic_layer(monkeypatch, tmp_path):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.snapshot_raw",
+        lambda *_: None,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.RunContext.create",
+        lambda: run_context,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.TABLE_CONFIG",
+        {"dummy": {}},
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_validation",
+        lambda *a, **k: {
+            "errors": [],
+            "warnings": [],
+        },  # Pass all validations
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_contract",
+        lambda *a, **k: ({}, set()),
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.assemble_events",
+        lambda *a, **k: {
+            "status": "success",
+            "error": [],
+            "info": [],
+        },  # Pass, status success
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.build_semantic_layer",
+        lambda *a, **k: {
+            "status": "failed",
+            "error": ["boom"],
+            "info": [],
+        },  # Force to fail on build semantic layer
+    )
+
+    with pytest.raises(SystemExit) as e:
+        main()
+
+    assert e.value.code == 1
+    assert (run_context.logs_path / "validation_initial.json").exists()
+    assert (run_context.logs_path / "contract_report.json").exists()
+    assert (run_context.logs_path / "validation_post_contract.json").exists()
+    assert (run_context.logs_path / "assemble_report.json").exists()
+    assert (run_context.logs_path / "semantic_report.json").exists()
+
+
+def test_main_fails_on_execute_publish_lifecycle(monkeypatch, tmp_path):
+
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.snapshot_raw",
+        lambda *_: None,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.RunContext.create",
+        lambda: run_context,
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.TABLE_CONFIG",
+        {"dummy": {}},
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_validation",
+        lambda *a, **k: {
+            "errors": [],
+            "warnings": [],
+        },  # Pass all validations
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.apply_contract",
+        lambda *a, **k: ({}, set()),
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.assemble_events",
+        lambda *a, **k: {
+            "status": "success",
+            "error": [],
+            "info": [],
+        },  # Pass, status success
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.build_semantic_layer",
+        lambda *a, **k: {
+            "status": "success",
+            "error": [],
+            "info": [],
+        },  # Pass, status success
+    )
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.execute_publish_lifecycle",
+        lambda *a, **k: {
+            "status": "failed",
+            "errors": ["boom"],
+            "info": [],
+        },  # Force to fail on publish lifecyle
+    )
+
+    with pytest.raises(SystemExit) as e:
+        main()
+
+    assert e.value.code == 1
+    assert (run_context.logs_path / "validation_initial.json").exists()
+    assert (run_context.logs_path / "contract_report.json").exists()
+    assert (run_context.logs_path / "validation_post_contract.json").exists()
+    assert (run_context.logs_path / "assemble_report.json").exists()
+    assert (run_context.logs_path / "semantic_report.json").exists()
+    assert (run_context.logs_path / "publish_report.json").exists()
 
 
 def test_main_success(monkeypatch, tmp_path):
 
-    fake_ctx = RunContext.create(base_path=tmp_path, run_id="x")
+    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+
+    monkeypatch.setattr(
+        "data_pipeline.run_pipeline.snapshot_raw",
+        lambda *_: None,
+    )
 
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.RunContext.create",
-        lambda: fake_ctx,
+        lambda: run_context,
     )
 
     monkeypatch.setattr(
@@ -148,21 +334,16 @@ def test_main_success(monkeypatch, tmp_path):
         },  # Pass, status success
     )
 
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
-        lambda *_: None,
-    )
-
     with pytest.raises(SystemExit) as e:
         main()
 
     assert e.value.code == 0
-    assert (fake_ctx.logs_path / "validation_initial.json").exists()
-    assert (fake_ctx.logs_path / "contract_report.json").exists()
-    assert (fake_ctx.logs_path / "validation_post_contract.json").exists()
-    assert (fake_ctx.logs_path / "assemble_report.json").exists()
-    assert (fake_ctx.logs_path / "semantic_report.json").exists()
-    assert (fake_ctx.logs_path / "publish_report.json").exists()
+    assert (run_context.logs_path / "validation_initial.json").exists()
+    assert (run_context.logs_path / "contract_report.json").exists()
+    assert (run_context.logs_path / "validation_post_contract.json").exists()
+    assert (run_context.logs_path / "assemble_report.json").exists()
+    assert (run_context.logs_path / "semantic_report.json").exists()
+    assert (run_context.logs_path / "publish_report.json").exists()
 
 
 # =============================================================================

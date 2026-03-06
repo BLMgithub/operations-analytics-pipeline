@@ -3,7 +3,7 @@
 # =============================================================================
 
 # ------------------------------------------------------------
-# CONFIGURATIONS FOR assemble_validate_events.py
+# ASSEMBLE EVENTS CONFIGS
 # ------------------------------------------------------------
 
 # Assemble events enforced schema and dtypes
@@ -11,6 +11,7 @@ ASSEMBLE_SCHEMA = [
     "order_id",
     "order_revenue",
     "seller_id",
+    "customer_id",
     "product_id",
     "order_status",
     "order_purchase_timestamp",
@@ -29,6 +30,7 @@ ASSEMBLE_DTYPES = {
     "order_id": "string",
     "order_revenue": "float64",
     "seller_id": "string",
+    "customer_id": "string",
     "product_id": "string",
     "order_status": "string",
     "order_purchase_timestamp": "datetime64[ns]",
@@ -43,9 +45,8 @@ ASSEMBLE_DTYPES = {
 
 
 # ------------------------------------------------------------
-# CONFIGURATIONS FOR build_bi_semantic_layer.py
+# SELLER SEMANTIC CONFIGS
 # ------------------------------------------------------------
-
 
 # Seller dimension enforced schema and dtypes
 SELLER_DIM_SCHEMA = [
@@ -96,17 +97,108 @@ SELLER_FACT_DTYPES = {
     "weekly_avg_approval_lag": "float64",
 }
 
+# ------------------------------------------------------------
+# CUSTOMER SEMANTIC CONFIGS
+# ------------------------------------------------------------
+
 # Customer Dimension and dtypes
 CUSTOMER_DIM_SCHEMA = [
-    "",
+    "customer_id",
+    "customer_state",
+    "run_id",
 ]
 
 
 CUSTOMER_DIM_DTYPES = {
-    "": "",
+    "customer_id": "string",
+    "customer_state": "string",
+    "run_id": "string",
 }
 
 # Customer Fact and dtypes
+CUSTOMER_FACT_SCHEMA = [
+    "customer_id",
+    "order_year_week",
+    "week_start_date",
+    "run_id",
+    "weekly_order_count",
+    "weekly_delivered_orders",
+    "weekly_cancelled_orders",
+    "weekly_revenue",
+    "weekly_avg_lead_time",
+    "weekly_total_lead_time",
+    "weekly_avg_delivery_delay",
+    "weekly_total_delivery_delay",
+    "weekly_avg_approval_lag",
+]
 
+
+CUSTOMER_FACT_DTYPES = {
+    "customer_id": "string",
+    "order_year_week": "string",
+    "week_start_date": "datetime64[ns]",
+    "run_id": "string",
+    "weekly_order_count": "int64",
+    "weekly_delivered_orders": "int64",
+    "weekly_cancelled_orders": "int64",
+    "weekly_revenue": "float64",
+    "weekly_avg_lead_time": "float64",
+    "weekly_total_lead_time": "int64",
+    "weekly_avg_delivery_delay": "float64",
+    "weekly_total_delivery_delay": "int64",
+    "weekly_avg_approval_lag": "float64",
+}
+
+
+# ------------------------------------------------------------
+# PRODUCT SEMANTIC CONFIGS
+# ------------------------------------------------------------
+
+# Product Dim and dtypes
+PRODUCT_DIM_SCHEMA = [
+    "product_id",
+    "product_category_name",
+    "product_weight_g",
+    "run_id",
+]
+
+PRODUCT_DIM_DTYPES = {
+    "product_id": "string",
+    "product_category_name": "string",
+    "product_weight_g": "float",
+    "run_id": "string",
+}
 
 # Product Fact and dtypes
+PRODUCT_FACT_SCHEMA = [
+    "product_id",
+    "order_year_week",
+    "week_start_date",
+    "run_id",
+    "weekly_order_count",
+    "weekly_delivered_orders",
+    "weekly_cancelled_orders",
+    "weekly_revenue",
+    "weekly_avg_lead_time",
+    "weekly_total_lead_time",
+    "weekly_avg_delivery_delay",
+    "weekly_total_delivery_delay",
+    "weekly_avg_approval_lag",
+]
+
+
+PRODUCT_FACT_DTYPES = {
+    "product_id": "string",
+    "order_year_week": "string",
+    "week_start_date": "datetime64[ns]",
+    "run_id": "string",
+    "weekly_order_count": "int64",
+    "weekly_delivered_orders": "int64",
+    "weekly_cancelled_orders": "int64",
+    "weekly_revenue": "float64",
+    "weekly_avg_lead_time": "float64",
+    "weekly_total_lead_time": "int64",
+    "weekly_avg_delivery_delay": "float64",
+    "weekly_total_delivery_delay": "int64",
+    "weekly_avg_approval_lag": "float64",
+}

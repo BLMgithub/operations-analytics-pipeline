@@ -84,6 +84,7 @@ def valid_derived_df():
                 dtype="string",
             ),
             "seller_id": pd.Series(["seller1", "seller2"], dtype="string"),
+            "customer_id": pd.Series(["customer1", "customer2"], dtype="string"),
             "order_revenue": pd.Series([12.34, 56.78], dtype="float64"),
             "product_id": pd.Series(["prod1", "prod2"], dtype="string"),
             "order_status": pd.Series(["delivered", "cancelled"], dtype="string"),
@@ -246,6 +247,7 @@ def test_freeze_schema_enforces_strict_schema_success(valid_derived_df):
         "order_id": "string",
         "order_revenue": "float64",
         "seller_id": "string",
+        "customer_id": "string",
         "product_id": "string",
         "order_status": "string",
         "order_purchase_timestamp": "datetime64[ns]",
@@ -344,10 +346,12 @@ def test_assemble_data_fails_on_missing_column(
     output_file = run_context.assembled_path / "assembled_events.parquet"
 
     assert report["status"] == "failed"
+    assert report["failed_step"] == "freeze_schema"
     assert output_file.exists() == False
-    assert any(
-        "missing required columns: ['seller_id']" in error for error in report["errors"]
-    )
+
+    errors = report["steps"]["freeze_schema"]["errors"]
+
+    assert any("missing required columns: ['seller_id']" in error for error in errors)
 
 
 def test_assemble_data_fails_on_cardinality(
@@ -387,10 +391,14 @@ def test_assemble_data_fails_on_cardinality(
     output_file = run_context.assembled_path / "assembled_events.parquet"
 
     assert report["status"] == "failed"
+    assert report["failed_step"] == "merge_events"
     assert output_file.exists() == False
+
+    errors = report["steps"]["merge_events"]["errors"]
+
     assert any(
         "Cardinality violation detected: expected 1 row per order" in error
-        for error in report["errors"]
+        for error in errors
     )
 
 
