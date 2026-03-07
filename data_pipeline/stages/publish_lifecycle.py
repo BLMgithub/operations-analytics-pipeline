@@ -249,17 +249,18 @@ def activate_published_version(run_context: RunContext) -> Dict:
 
 def execute_publish_lifecycle(run_context: RunContext) -> Dict:
     """
-    Runs pre-publish validation, promote only contract compliant module semantics.
+    Execute full publish lifecycle for semantic artifacts.
 
-    Execution:
-
+    Execution steps:
     - Run semantic integrity gate
     - Promote validated artifacts into version directory
-    - Atomically activate version pointer
+    - Atomically activate published pointer
+
+    Guarantees:
+    - Only fully validated semantic versions become visible to BI.
 
     Failure behavior:
-
-    - Any step failure halts publish lifecycle
+    - Any step failure halts publish lifecycle and prevents activation.
     """
 
     report = {

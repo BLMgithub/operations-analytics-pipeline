@@ -23,13 +23,13 @@ from data_pipeline.stages.publish_lifecycle import execute_publish_lifecycle
 # ------------------------------------------------------------
 
 
-def snapshot_raw(run_context: RunContext) -> None:
+def snapshot_raw_storage(run_context: RunContext) -> None:
     """
     Creates a run-scoped raw snapshot by copying the entire source raw
     directory into the run context.
     """
 
-    source = run_context.source_raw_path
+    source = run_context.storage_raw_path
     destination = run_context.raw_snapshot_path
 
     if not source.exists():
@@ -135,7 +135,7 @@ def main() -> None:
     run_context.initialize_directories()
 
     # Create raw snapshot at runtime
-    snapshot_raw(run_context)
+    snapshot_raw_storage(run_context)
     initiliaze_metadata(run_context)
 
     # Initial validation

@@ -191,7 +191,7 @@ def test_run_integrity_gate_success(
     valid_product_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     # Match expected table names for each module
@@ -223,7 +223,7 @@ def test_run_integrity_gate_success(
 
 def test_run_integrity_gate_fails_on_missing_directory(tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     report = run_integrity_gate(run_context)
 
     assert report["status"] == "failed"
@@ -235,7 +235,7 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     valid_seller_fact,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -261,7 +261,7 @@ def test_run_integrity_gate_fails_on_loading_parquet_files(
     valid_seller_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -289,7 +289,7 @@ def test_run_integrity_gate_fails_on_empty_dataframe(tmp_path):
     empty_seller_fact = pd.DataFrame()
     empty_seller_dim = pd.DataFrame()
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -318,7 +318,7 @@ def test_run_integrity_gate_fails_on_missing_columns(
     valid_seller_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     valid_seller_fact = valid_seller_fact.drop(columns="seller_id")
@@ -356,7 +356,9 @@ def test_promote_semantic_version_success(
     valid_seller_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T000000_abc123"
+    )
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -384,7 +386,7 @@ def test_promote_semantic_version_fails_on_existing_version_directory(
     valid_seller_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -413,7 +415,9 @@ def test_promote_semantic_version_fails_on_existing_version_directory(
 
 def test_promote_semantic_version_fails_on_making_directory(tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T000000_abc123"
+    )
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -435,7 +439,9 @@ def test_promote_semantic_version_fails_on_copying_semantic(
     valid_seller_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T000000_abc123"
+    )
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:
@@ -478,7 +484,9 @@ def test_execute_publish_lifecycle_success(
     valid_product_dim,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T000000_abc123"
+    )
     run_context.initialize_directories()
 
     df_map = {
@@ -512,7 +520,9 @@ def test_execute_publish_lifecycle_fails_on_gate(
     valid_seller_fact,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T000000_abc123"
+    )
     run_context.initialize_directories()
 
     for module in SEMANTIC_MODULES:

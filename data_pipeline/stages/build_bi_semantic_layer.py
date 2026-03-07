@@ -351,6 +351,10 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
     - Fail fast if dataset is missing or empty
     - Execute registered semantic builders
     - Apply module-level freeze contracts
+        - schema enforcement
+        - dtype enforcement
+        - grain validation
+        - deterministic ordering
     - Export semantic artifacts into run-scoped semantic directory
     - Aggregate findings into report
 

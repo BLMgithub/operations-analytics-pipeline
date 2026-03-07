@@ -48,7 +48,7 @@ def merge_data(tables: dict) -> pd.DataFrame:
 
     Structural expectations:
     - `df_orders` defines the base order grain
-    - `df_order_items` must not expand order cardinality
+    - `df_order_items` must maintain 1:1 relationship with order_id
     - `df_payments` is left-joined, expected one payment per order
     """
 

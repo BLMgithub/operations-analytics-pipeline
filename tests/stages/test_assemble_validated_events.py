@@ -286,7 +286,7 @@ def test_assemble_data_success(
     valid_payments_df,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     valid_orders_df.to_parquet(
@@ -323,7 +323,7 @@ def test_assemble_data_fails_on_missing_column(
     valid_payments_df,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     invalid_order_items_df = valid_order_items_df.drop(columns="seller_id")
@@ -370,7 +370,7 @@ def test_assemble_data_fails_on_cardinality(
         }
     )
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     valid_orders_df.to_parquet(

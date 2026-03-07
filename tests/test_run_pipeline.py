@@ -3,24 +3,24 @@
 # =============================================================================
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.run_pipeline import snapshot_raw, main
+from data_pipeline.run_pipeline import snapshot_raw_storage, main
 import pytest
 
 
-def test_snapshot_raw_raises_when_source_missing(tmp_path):
+def test_snapshot_raw_storage_raises_when_source_missing(tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(storage=tmp_path, run_id="20230101T000000_abc123")
 
     with pytest.raises(FileNotFoundError):
-        snapshot_raw(run_context)
+        snapshot_raw_storage(run_context)
 
 
 def test_main_fails_on_initial_validation(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 
@@ -46,10 +46,10 @@ def test_main_fails_on_initial_validation(monkeypatch, tmp_path):
 
 def test_main_fails_on_post_contract_validation(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 
@@ -94,10 +94,10 @@ def test_main_fails_on_post_contract_validation(monkeypatch, tmp_path):
 
 def test_main_fails_on_assemble_events(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 
@@ -145,10 +145,10 @@ def test_main_fails_on_assemble_events(monkeypatch, tmp_path):
 
 def test_main_fails_on_build_semantic_layer(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 
@@ -206,10 +206,10 @@ def test_main_fails_on_build_semantic_layer(monkeypatch, tmp_path):
 
 def test_main_fails_on_execute_publish_lifecycle(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 
@@ -277,10 +277,10 @@ def test_main_fails_on_execute_publish_lifecycle(monkeypatch, tmp_path):
 
 def test_main_success(monkeypatch, tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="20230101T000000_abc123")
+    run_context = RunContext.create(base=tmp_path, run_id="20230101T000000_abc123")
 
     monkeypatch.setattr(
-        "data_pipeline.run_pipeline.snapshot_raw",
+        "data_pipeline.run_pipeline.snapshot_raw_storage",
         lambda *_: None,
     )
 

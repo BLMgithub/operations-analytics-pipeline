@@ -168,7 +168,7 @@ def test_log_info_appends_only_to_info(empty_report):
 
 def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled_df):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
 
     seller_semantic = build_seller_semantic(valid_assembled_df, run_context)
     expected = (
@@ -187,7 +187,7 @@ def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled
 
 def test_seller_semantic_fails_on_multiple_run_ids(tmp_path, valid_assembled_df):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
 
     broken_df = valid_assembled_df.copy()
     broken_df.loc[1, "run_id"] = "another_run"
@@ -208,7 +208,7 @@ def test_build_semantic_layer_success(
     valid_products_df,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     valid_assembled_df.to_parquet(
@@ -243,7 +243,7 @@ def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df
     broken_assembled = valid_assembled_df.copy()
     broken_assembled.loc[1, "run_id"] = "another_run"
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     broken_assembled.to_parquet(
@@ -265,7 +265,7 @@ def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled
     broken_assembled = valid_assembled_df.copy()
     broken_assembled.drop(columns="approval_lag_days", inplace=True)
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     broken_assembled.to_parquet(
@@ -286,7 +286,7 @@ def test_build_semantic_layer_fails_on_missing_or_empty_df(tmp_path):
 
     empty_df = pd.DataFrame()
 
-    run_context = RunContext.create(base_path=tmp_path, run_id="dummy_run_id")
+    run_context = RunContext.create(base=tmp_path, run_id="dummy_run_id")
     run_context.initialize_directories()
 
     empty_df.to_parquet(run_context.assembled_path / "assembled_events_2023_01.parquet")

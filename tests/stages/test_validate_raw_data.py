@@ -405,7 +405,7 @@ def test_validation_passes(
     valid_products_df,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     # Export to snapshot directory
@@ -444,7 +444,7 @@ def test_validation_fails_on_missing_logical_table(
     valid_products_df,
 ):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     # Missing df_payments on snapshot
@@ -476,7 +476,7 @@ def test_validation_fails_on_multiple_errors(tmp_path, valid_orders_df):
 
     df_orders = valid_orders_df
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     df_orders.to_csv(

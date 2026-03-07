@@ -210,7 +210,7 @@ def test_apply_contract_event_fact_success(tmp_path):
         }
     )
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     df.to_csv(run_context.raw_snapshot_path / "df_orders_2026_01.csv", index=False)
@@ -229,7 +229,7 @@ def test_apply_contract_event_fact_success(tmp_path):
 
 def test_apply_contract_unknown_table(tmp_path):
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     report, _ = apply_contract(run_context, "unknown_table")
@@ -249,7 +249,7 @@ def test_apply_contract_duplicate_on_entity_reference(tmp_path):
         }
     )
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     df.to_csv(run_context.raw_snapshot_path / "df_customers_2026_01.csv", index=False)
@@ -278,7 +278,7 @@ def test_apply_contract_duplicate_on_transactional_detail(tmp_path):
         }
     )
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     df.to_csv(run_context.raw_snapshot_path / "df_payments_2026_01.csv", index=False)
@@ -336,7 +336,7 @@ def test_apply_contract_cascade_drop_with_order_id(tmp_path):
         }
     )
 
-    run_context = RunContext.create(base_path=tmp_path)
+    run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
     df_order.to_csv(
