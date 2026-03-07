@@ -29,7 +29,7 @@ def test_run_context_generates_run_id(tmp_path):
 
 def test_initialize_directories_does_not_create_publish_dirs(tmp_path):
 
-    ctx = RunContext.create(storage=tmp_path, run_id="abc123")
+    ctx = RunContext.create(base=tmp_path, storage=tmp_path, run_id="abc123")
 
     ctx.initialize_directories()
 
@@ -39,7 +39,7 @@ def test_initialize_directories_does_not_create_publish_dirs(tmp_path):
 
 def test_initialize_directories_is_idempotent(tmp_path):
 
-    ctx = RunContext.create(base=tmp_path, run_id="abc123")
+    ctx = RunContext.create(base=tmp_path, storage=tmp_path, run_id="abc123")
 
     ctx.initialize_directories()
     ctx.initialize_directories()  # should not raise
@@ -51,6 +51,7 @@ def test_run_id_format_is_stable(tmp_path):
 
     ctx = RunContext.create(
         base=tmp_path,
+        storage=tmp_path,
         run_id_factory=lambda: "20240102T030405_abcdef",
     )
 
@@ -59,7 +60,7 @@ def test_run_id_format_is_stable(tmp_path):
 
 def test_default_run_id_shape(tmp_path):
 
-    ctx = RunContext.create(base=tmp_path)
+    ctx = RunContext.create(base=tmp_path, storage=tmp_path)
 
     assert "_" in ctx.run_id
     assert len(ctx.run_id.split("_")[1]) == 6
