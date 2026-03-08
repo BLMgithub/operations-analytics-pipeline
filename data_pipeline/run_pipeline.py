@@ -3,9 +3,7 @@
 # =============================================================================
 
 from pathlib import Path
-from shutil import copytree
 from datetime import datetime as dt
-import sys
 import json
 
 
@@ -17,25 +15,31 @@ from data_pipeline.stages.assemble_validated_events import assemble_events
 from data_pipeline.stages.build_bi_semantic_layer import build_semantic_layer
 from data_pipeline.stages.publish_lifecycle import execute_publish_lifecycle
 
+from data_pipeline.shared.storage_adapter import (
+    download_raw_snapshot,
+    upload_run_artifacts,
+)
+
 
 # ------------------------------------------------------------
 # SUPPORTING UTILITIES
 # ------------------------------------------------------------
 
+# REPLACED with GCS adapter
 
-def snapshot_raw_storage(run_context: RunContext) -> None:
-    """
-    Creates a run-scoped raw snapshot by copying the entire source raw
-    directory into the run context.
-    """
+# def snapshot_raw_storage(run_context: RunContext) -> None:
+#     """
+#     Creates a run-scoped raw snapshot by copying the entire source raw
+#     directory into the run context.
+#     """
 
-    source = run_context.storage_raw_path
-    destination = run_context.raw_snapshot_path
+#     source = run_context.storage_raw_path
+#     destination = run_context.raw_snapshot_path
 
-    if not source.exists():
-        raise FileNotFoundError(f"Raw source path not found: {source}")
+#     if not source.exists():
+#         raise FileNotFoundError(f"Raw source path not found: {source}")
 
-    copytree(source, destination, dirs_exist_ok=True)
+#     copytree(source, destination, dirs_exist_ok=True)
 
 
 def persist_json(path: Path, payload: dict) -> None:
@@ -134,118 +138,123 @@ def main() -> None:
     run_context = RunContext.create()
     run_context.initialize_directories()
 
+    ## snapshot_raw_storage(run_context) : replaced with GCS adapter
+
     # Create raw snapshot at runtime
-    snapshot_raw_storage(run_context)
+    download_raw_snapshot(run_context)
     initiliaze_metadata(run_context)
 
-    # Initial validation
-    validation_initial = apply_validation(run_context)
+    try:
+        # Initial validation
+        validation_initial = apply_validation(run_context)
 
-    persist_json(
-        run_context.logs_path / "validation_initial.json",
-        {
-            "run_id": run_context.run_id,
-            "report": validation_initial,
-        },
-    )
-
-    # Early exit for structural errors else apply contract
-    if validation_initial["errors"]:
-        finalize_metadata(run_context, "FAILED")
-        sys.exit(1)
-
-    report_contract = []
-
-    # Accumulates invalid order_ids produced by parent (event_fact) tables and
-    # applies them to child (transaction_detail) tables during the same run for cascading.
-    invalid_order_ids = set()
-
-    # TABLE_CONFIG order must list parent tables before their children.
-    for table_name in TABLE_CONFIG:
-
-        contract, new_invalid_ids = apply_contract(
-            run_context,
-            table_name,
-            invalid_order_ids,
+        persist_json(
+            run_context.logs_path / "validation_initial.json",
+            {
+                "run_id": run_context.run_id,
+                "report": validation_initial,
+            },
         )
 
-        invalid_order_ids |= new_invalid_ids
-        report_contract.append(contract)
+        # Early exit for structural errors else apply contract
+        if validation_initial["errors"]:
+            raise RuntimeError("stage failure")
 
-    persist_json(
-        run_context.logs_path / "contract_report.json",
-        {
-            "run_id": run_context.run_id,
-            "report": report_contract,
-        },
-    )
+        report_contract = []
 
-    # Rerun validation on CONTRACTED data
-    validation_post_contract = apply_validation(
-        run_context,
-        base_path=run_context.contracted_path,
-    )
+        # Accumulates invalid order_ids produced by parent (event_fact) tables and
+        # applies them to child (transaction_detail) tables during the same run for cascading.
+        invalid_order_ids = set()
 
-    persist_json(
-        run_context.logs_path / "validation_post_contract.json",
-        {
-            "run_id": run_context.run_id,
-            "report": validation_post_contract,
-        },
-    )
+        # TABLE_CONFIG order must list parent tables before their children.
+        for table_name in TABLE_CONFIG:
 
-    # Intervention: Either manual fixing or escalate the data to source owner
-    if validation_post_contract["errors"] or validation_post_contract["warnings"]:
-        finalize_metadata(run_context, "FAILED")
-        sys.exit(1)
+            contract, new_invalid_ids = apply_contract(
+                run_context,
+                table_name,
+                invalid_order_ids,
+            )
 
-    # Assemble event table
-    assemble = assemble_events(run_context)
+            invalid_order_ids |= new_invalid_ids
+            report_contract.append(contract)
 
-    persist_json(
-        run_context.logs_path / "assemble_report.json",
-        {
-            "run_id": run_context.run_id,
-            "report": assemble,
-        },
-    )
+        persist_json(
+            run_context.logs_path / "contract_report.json",
+            {
+                "run_id": run_context.run_id,
+                "report": report_contract,
+            },
+        )
 
-    if assemble["status"] == "failed":
-        finalize_metadata(run_context, "FAILED")
-        sys.exit(1)
+        # Rerun validation on CONTRACTED data
+        validation_post_contract = apply_validation(
+            run_context,
+            base_path=run_context.contracted_path,
+        )
 
-    # Semantic modeling
-    semantic = build_semantic_layer(run_context)
+        persist_json(
+            run_context.logs_path / "validation_post_contract.json",
+            {
+                "run_id": run_context.run_id,
+                "report": validation_post_contract,
+            },
+        )
 
-    persist_json(
-        run_context.logs_path / "semantic_report.json",
-        {
-            "run_id": run_context.run_id,
-            "report": semantic,
-        },
-    )
+        # Intervention: Either manual fixing or escalate the data to source owner
+        if validation_post_contract["errors"] or validation_post_contract["warnings"]:
+            raise RuntimeError("stage failure")
 
-    if semantic["status"] == "failed":
-        finalize_metadata(run_context, "FAILED")
-        sys.exit(1)
+        # Assemble event table
+        assemble = assemble_events(run_context)
 
-    # Pre-publish semantic validation
-    publish = execute_publish_lifecycle(run_context)
+        persist_json(
+            run_context.logs_path / "assemble_report.json",
+            {
+                "run_id": run_context.run_id,
+                "report": assemble,
+            },
+        )
 
-    persist_json(
-        run_context.logs_path / "publish_report.json",
-        {
-            "run_id": run_context.run_id,
-            "report": publish,
-        },
-    )
+        if assemble["status"] == "failed":
+            raise RuntimeError("stage failure")
 
-    if publish["status"] == "failed":
-        finalize_metadata(run_context, "FAILED")
-        sys.exit(1)
+        # Semantic modeling
+        semantic = build_semantic_layer(run_context)
 
-    finalize_metadata(run_context, "SUCCESS")
-    sys.exit(0)
+        persist_json(
+            run_context.logs_path / "semantic_report.json",
+            {
+                "run_id": run_context.run_id,
+                "report": semantic,
+            },
+        )
+
+        if semantic["status"] == "failed":
+            raise RuntimeError("stage failure")
+
+        # Pre-publish semantic validation
+        publish = execute_publish_lifecycle(run_context)
+
+        persist_json(
+            run_context.logs_path / "publish_report.json",
+            {
+                "run_id": run_context.run_id,
+                "report": publish,
+            },
+        )
+
+        if publish["status"] == "failed":
+            raise RuntimeError("stage failure")
+
+        finalize_metadata(run_context, status="SUCCESS")
+
+    except Exception:
+
+        finalize_metadata(run_context, status="FAILED")
+        raise
+
+    finally:
+        upload_run_artifacts(run_context)
 
 
 if __name__ == "__main__":

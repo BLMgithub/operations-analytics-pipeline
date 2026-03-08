@@ -3,15 +3,16 @@
 # =============================================================================
 
 import pandas as pd
-import shutil
 from datetime import datetime as dt
 from contextlib import suppress
+from pathlib import Path
 import json
 import os
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.stages.build_bi_semantic_layer import SEMANTIC_MODULES
+from data_pipeline.shared.storage_adapter import upload_publish_artifacts
 
 # ------------------------------------------------------------
 # ASSEMBLE REPORT & LOGS
@@ -156,8 +157,8 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
 
     report = init_report()
 
-    semantic_path = run_context.semantic_path
-    version_path = run_context.version_path
+    ## semantic_path = run_context.semantic_path
+    version_path = Path(run_context.version_path)
 
     if version_path.exists():
         report["status"] = "failed"
@@ -166,15 +167,21 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
         return report
 
     # Create version directory
+    ## try:
+    ##     version_path.mkdir(parents=True, exist_ok=False)
+
+    # REPLACED with with GCS adapter
+
+    ## for module_name in SEMANTIC_MODULES:
+    ##     source_module_path = semantic_path / module_name
+    ##   target_module_path = version_path / module_name
+
+    # Copy validated semantics to version directory
+
+    ## shutil.copytree(source_module_path, target_module_path)
+
     try:
-        version_path.mkdir(parents=True, exist_ok=False)
-
-        for module_name in SEMANTIC_MODULES:
-            source_module_path = semantic_path / module_name
-            target_module_path = version_path / module_name
-
-            # Copy validated semantics to version directory
-            shutil.copytree(source_module_path, target_module_path)
+        upload_publish_artifacts(run_context)
 
     except Exception as e:
         report["status"] = "failed"
@@ -209,7 +216,7 @@ def activate_published_version(run_context: RunContext) -> Dict:
 
     report = init_report()
 
-    latest_path = run_context.latest_pointer_path
+    latest_path = Path(run_context.latest_pointer_path)
     latest_path.parent.mkdir(parents=True, exist_ok=True)
 
     tmp_path = latest_path.with_suffix(".tmp")
