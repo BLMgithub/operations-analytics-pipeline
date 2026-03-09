@@ -3,4 +3,5 @@ pytest==9.0.2
 pyarrow==19.0.0
 black==24.3.0
 ruff==0.0.264
+google-cloud-storage==3.9.0
 pytest-cov
