@@ -183,6 +183,18 @@ def test_apply_contract_event_fact_success(tmp_path):
     df = pd.DataFrame(
         {
             "order_id": [1, 2, 3, 4],
+            "customer_id": [
+                "customer1",
+                "customer2",
+                "customer3",
+                "customer4",
+            ],
+            "order_status": [
+                "cancelled",
+                "delivered",
+                "pending",
+                "pending",
+            ],
             "order_purchase_timestamp": [
                 "2026-01-01 10:25:15",
                 "2026-01-01 10:25:15",  # duplicate
@@ -249,7 +261,7 @@ def test_apply_contract_duplicate_on_entity_reference(tmp_path):
         }
     )
 
-    run_context = RunContext.create(base=tmp_path)
+    run_context = RunContext.create(base=tmp_path, storage=tmp_path)
     run_context.initialize_directories()
 
     df.to_csv(run_context.raw_snapshot_path / "df_customers_2026_01.csv", index=False)

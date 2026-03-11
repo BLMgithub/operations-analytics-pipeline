@@ -144,6 +144,10 @@ def test_base_validation_fails_on_missing_required_column(
             "customer_id",
             "customer_state",
         ],
+        [
+            "customer_id",
+            "customer_state",
+        ],
         empty_report,
     )
 
@@ -158,7 +162,7 @@ def test_base_validation_fails_on_missing_required_column(
 def test_base_validation_fails_on_empty_df(empty_report):
 
     df = pd.DataFrame()
-    ok = run_base_validations(df, "df_test", ["id"], ["col"], empty_report)
+    ok = run_base_validations(df, "df_test", ["id"], ["col"], ["id"], empty_report)
 
     assert ok is False
     assert len(empty_report["errors"]) == 1
@@ -168,7 +172,7 @@ def test_base_validation_fails_on_empty_df(empty_report):
 def test_base_validation_fails_on_missing_pk(empty_report):
 
     df = pd.DataFrame({"x": [1, 2]})
-    ok = run_base_validations(df, "df_test", ["id"], ["x"], empty_report)
+    ok = run_base_validations(df, "df_test", ["id"], ["x"], ["id"], empty_report)
 
     assert ok is False
     assert len(empty_report["errors"]) == 1
@@ -196,6 +200,11 @@ def test_base_validation_logs_error_on_conflicting_duplicate_pk(
             "product_length_cm",
             "product_height_cm",
             "product_width_cm",
+        ],
+        [
+            "product_id",
+            "product_category_name",
+            "product_weight_g",
         ],
         empty_report,
     )
@@ -231,6 +240,10 @@ def test_base_validation_logs_warning_on_exact_duplicate_pk(empty_report):
             "payment_installments",
             "payment_value",
         ],
+        [
+            "order_id",
+            "payment_sequential",
+        ],
         empty_report,
     )
 
@@ -245,10 +258,10 @@ def test_base_validation_logs_warning_on_exact_duplicate_pk(empty_report):
 def test_base_validation_passes_with_non_fatal_issues(empty_report):
     df = pd.DataFrame(
         {
-            "customer_id": [1, None],
-            "customer_zip_code_prefix": ["zip1", "zip3"],
+            "customer_id": [1, 2],
+            "customer_zip_code_prefix": ["zip1", "zip2"],
             "customer_city": ["city1", "city3"],
-            "customer_state": ["state1", "state3"],
+            "customer_state": ["state1", None],
         }
     )
 
@@ -262,13 +275,17 @@ def test_base_validation_passes_with_non_fatal_issues(empty_report):
             "customer_city",
             "customer_state",
         ],
+        [
+            "customer_id",
+            "customer_state",
+        ],
         empty_report,
     )
 
     assert ok is True
     assert len(empty_report["warnings"]) == 1
     assert any(
-        "1 row(s) with null primary key values" in warning
+        "1 null values in non-nullable column" in warning
         for warning in empty_report["warnings"]
     )
 
