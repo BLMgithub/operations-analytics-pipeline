@@ -11,7 +11,7 @@ import pandas as pd
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.modeling_configs import ASSEMBLE_SCHEMA, ASSEMBLE_DTYPES
-from data_pipeline.shared.raw_loader_exporter import load_logical_table, export_file
+from data_pipeline.shared.loader_exporter import load_logical_table, export_file
 
 EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
 

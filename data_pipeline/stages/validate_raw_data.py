@@ -8,7 +8,7 @@
 
 from typing import Dict, List
 import pandas as pd
-from data_pipeline.shared.raw_loader_exporter import load_logical_table
+from data_pipeline.shared.loader_exporter import load_logical_table
 from data_pipeline.shared.table_configs import (
     TABLE_CONFIG,
     REQUIRED_TIMESTAMPS,

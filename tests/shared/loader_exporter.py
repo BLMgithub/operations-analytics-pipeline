@@ -5,7 +5,7 @@
 import pandas as pd
 import pytest
 
-from data_pipeline.shared.raw_loader_exporter import (
+from data_pipeline.shared.loader_exporter import (
     FILE_LOADERS,
     load_logical_table,
     export_file,
