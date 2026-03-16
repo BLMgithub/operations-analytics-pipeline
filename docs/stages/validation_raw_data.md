@@ -9,6 +9,8 @@ Raw Data Structural Validation Stage
 Evaluate raw datasets against declared structural contracts before any mutation or transformation occurs.<br>
 Detect schema violations, structural inconsistencies, and cross-table integrity issues that would compromise downstream assembly or semantic aggregation.
 
+![validation-stage](../../assets/diagrams/02-validation-stage-diagram.png)
+
 ## **Inputs:**
 
 RunContext

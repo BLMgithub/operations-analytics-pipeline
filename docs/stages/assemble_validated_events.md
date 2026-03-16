@@ -9,6 +9,8 @@ Event Assembly Stage
 Construct the canonical event-level dataset from contract-compliant source tables. <br>
 Enforce the declared event grain and produce a deterministic dataset used as the foundation for semantic aggregation.
 
+![assembly-stage](../../assets/diagrams/04-assemble-stage-diagram.png)
+
 ## **Inputs:**
 
 RunContext

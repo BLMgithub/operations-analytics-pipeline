@@ -9,6 +9,8 @@ Semantic Layer Construction Stage
 Transform the assembled event dataset into BI-safe semantic modules consisting of fact and dimension tables with enforced analytical grains.
 Produce deterministic semantic artifacts suitable for direct consumption by downstream BI tools.
 
+![semantic-stage](../../assets/diagrams/05-semantic-stage-diagram.png)
+
 ## **Inputs:**
 
 RunContext

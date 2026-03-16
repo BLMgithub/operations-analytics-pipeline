@@ -9,6 +9,8 @@ Raw Data Structural Contract Enforcement Stage
 Apply admissible structural repairs to raw datasets in order to produce contract-compliant datasets suitable for deterministic downstream processing. <br>
 Remove rows that violate declared structural invariants while preserving dataset semantics.
 
+![raw-data-contract-stage](../../assets/diagrams/03-contract-stage-diagram.png)
+
 ## **Inputs:**
 
 RunContext

@@ -10,6 +10,8 @@ Coordinate deterministic execution of the end-to-end data pipeline.
 Control stage ordering, lifecycle tracking, failure handling, and publish activation for a single run.
 Enforce forward-only stage progression and run isolation guarantees.
 
+![pipeline-runner](../assets/diagrams/01-pipeline-runner-diagram.png)
+
 ## **Inputs:**
 
 RunContext
