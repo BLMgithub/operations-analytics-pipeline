@@ -1,0 +1,9 @@
+google-api-python-client
+google-cloud-storage
+
+google-auth-httplib2
+google-auth-oauthlib
+
+httplib2
+pyparsing<3.0.0
+tzdata

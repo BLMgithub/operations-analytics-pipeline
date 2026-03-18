@@ -1,20 +1,26 @@
-.git
-.github
-.vscode
+.git/
+.gitignore
+.gitattributes
+.github/
 
-runtime
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+.venv/
+venv/
+env/
 
-.pytest_cache
-.ruff_cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.coveragerc
 
-tests
-docs
+.vscode/
+.idea/
+pyrightconfig.json
 
-data/published
-runtime
-data/run_artifact
-data/raw
+data/
+assets/
+docs/
+tests/
+
+dev-requirements.txt
