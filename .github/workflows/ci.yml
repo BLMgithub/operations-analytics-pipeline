@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI - Code Quality & Tests
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r dev-requirements.txt
@@ -27,13 +27,13 @@ jobs:
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
-      - name: Check formatting
+      - name: Check Code Formatting
         run: black --check .
 
-      - name: Lint with ruff
+      - name: Ruff Linting
         run: ruff check .
 
-      - name: Run tests with coverage enforcement
+      - name: Run Tests with Coverage
         run: |
           pytest \
             --cov=data_pipeline \
