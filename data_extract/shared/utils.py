@@ -1,6 +1,8 @@
 # =============================================================================
 # EXTRACTOR UTILS
 # =============================================================================
+
+
 import pyparsing
 
 if not hasattr(pyparsing, "DelimitedList"):
@@ -9,12 +11,25 @@ if not hasattr(pyparsing, "DelimitedList"):
 from googleapiclient.discovery import build
 from google.cloud import storage
 from typing import Any, TypeAlias
+from datetime import datetime as dt
+from zoneinfo import ZoneInfo
+
 
 GoogleDriveService: TypeAlias = Any
 
 # ------------------------------------------------------------
 # INGESTION VALIDATION
 # ------------------------------------------------------------
+
+
+def get_target_folder_name():
+    """
+    Creates target folder name with recent date as suffix (e.g. operations_YYYY_MM_DD).
+    """
+
+    pht_now = dt.now(ZoneInfo("Asia/Manila"))
+    today = pht_now.strftime("%Y_%m_%d")
+    return f"operations_{today}"
 
 
 def extract_file_content(
@@ -135,3 +150,24 @@ def upload_to_gcs(
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(data, content_type=content_type)
+
+
+def plant_success_flag(bucket_name: str, folder_path: str):
+    """
+    Uploads an empty _SUCCESS.txt file to signal the pipeline.
+
+    Args:
+        bucket_name: Target GCS bucket.
+        folder_path: The full path for the success mark
+    """
+
+    bucket_name = bucket_name.replace("gs://", "")
+
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(folder_path)
+
+    # Upload an empty string just to create the file
+    blob.upload_from_string("")
+
+    print("[INFO] Flag planted successfully")
