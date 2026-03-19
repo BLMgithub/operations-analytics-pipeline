@@ -64,7 +64,7 @@ jobs:
           gcloud run jobs deploy ${{ env.JOB_NAME }} \
             --image $IMAGE_PATH \
             --region ${{ env.REGION }} \
-            --service-account ${{ secrets.EXTRACTOR_SA_EMAIL }}
+            --service-account ${{ secrets.EXTRACTOR_SA_EMAIL }} \
             --memory 1Gi \
             --cpu 1 \
             --task-timeout 15m \

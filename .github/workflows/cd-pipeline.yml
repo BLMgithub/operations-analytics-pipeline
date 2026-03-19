@@ -65,7 +65,7 @@ jobs:
           gcloud run jobs deploy ${{ env.JOB_NAME }} \
             --image $IMAGE_PATH \
             --region ${{ env.REGION }} \
-            --service-account ${{ secrets.PIPELINE_SA_EMAIL }}
+            --service-account ${{ secrets.PIPELINE_SA_EMAIL }} \
             --memory 4Gi \
             --cpu 2 \
             --task-timeout 30m \
