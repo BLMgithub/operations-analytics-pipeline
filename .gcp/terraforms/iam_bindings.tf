@@ -51,19 +51,19 @@ resource "google_project_iam_member" "eventarc_workflows_invoker" {
 # ------------------------------------------------------------
 
 # Extractor Bucket Access
-resource "google_storage_bucket_iam_member" "extractor_pipeline_bucket_access" {
+resource "google_storage_bucket_iam_member" "drive_extractor_archival_access" {
+  bucket = google_storage_bucket.ops_archival_bucket.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.platform_accounts["drive-extractor-sa"].email}"
+}
+
+resource "google_storage_bucket_iam_member" "drive_extractor_pipeline_access" {
   bucket = google_storage_bucket.ops_pipeline_bucket.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.platform_accounts["drive-extractor-sa"].email}"
 }
 
 # Pipeline Runner Bucket Access
-resource "google_storage_bucket_iam_member" "pipeline_runner_archival_access" {
-  bucket = google_storage_bucket.ops_archival_bucket.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.platform_accounts["ops-pipeline-sa"].email}"
-}
-
 resource "google_storage_bucket_iam_member" "pipeline_runner_pipeline_access" {
   bucket = google_storage_bucket.ops_pipeline_bucket.name
   role   = "roles/storage.objectAdmin"
