@@ -1,0 +1,66 @@
+main:
+
+  # Get events produce by Eventarc
+  params: [event]
+  steps:
+    - init_vars:
+        assign:
+
+          # Extract "name" from "event" block
+          - data: ${event.data}
+          - fileName: ${default(map.get(data, "name"), "ignore")}
+
+    # Check generated success flag in archival bucket by data extractor
+    # Run pipeline if exist else exit 
+    - check_if_success_flag:
+        switch:
+          - condition: ${text.match_regex(fileName, "^status/.*\\.success$")}
+            next: log_and_run
+        next: silent_exit
+
+    - log_and_run:
+        call: sys.log
+        args:
+          text: '${"[INFO] Success flag detected, triggering pipeline for: " + fileName}'
+          severity: INFO
+        next: run_pipeline_job
+
+    - run_pipeline_job:
+        try:
+          steps:
+            - execute:
+                call: googleapis.run.v1.namespaces.jobs.run
+                args:
+                  name: ${"namespaces/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/jobs/operations-pipeline"}
+                  location: "us-east1"
+                result: job_output
+            - on_success:
+                next: end_workflow  
+        
+        # Retries with doubling waiting time each retry
+        retry:
+          predicate: ${http.default_retry_predicate}
+          max_retries: 3
+          backoff:
+            initial_delay: 10
+            max_delay: 60
+            multiplier: 2
+            
+        # Catch error
+        except:
+          as: e
+          steps:
+            - log_dead_letter:
+                call: sys.log
+                args:
+                  text: '${"[ERROR] Pipeline failed after 3 retries for:" + fileName + ". Error: " + json.encode_to_string(e)}'
+                  severity: CRITICAL
+            - fail_workflow:
+                raise: ${e}
+        next: end_workflow   
+
+    - silent_exit:
+        return: null
+
+    - end_workflow:
+        return: '${"[INFO] Pipeline triggered successfully for: " + fileName}'
