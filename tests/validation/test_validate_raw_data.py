@@ -6,11 +6,7 @@ import pandas as pd
 import pytest
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.validate_raw_data import (
-    init_report,
-    log_info,
-    log_warning,
-    log_error,
+from data_pipeline.validation.validation_executor import (
     run_base_validations,
     run_event_fact_validations,
     run_transaction_detail_validations,
@@ -18,6 +14,7 @@ from data_pipeline.stages.validate_raw_data import (
     apply_validation,
 )
 
+from data_pipeline.validation.logic import init_report, log_info, log_warning, log_error
 
 # ------------------------------------------------------------
 # FIXTURES (SHARED TEST DATA)

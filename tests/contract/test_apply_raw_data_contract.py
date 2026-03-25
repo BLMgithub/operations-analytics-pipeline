@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.apply_raw_data_contract import (
+from data_pipeline.contract.contract_logic import (
     deduplicate_exact_events,
     remove_unparsable_timestamps,
     remove_impossible_timestamps,
-    apply_contract,
 )
+from data_pipeline.contract.contract_executor import apply_contract
 
 
 # ------------------------------------------------------------

@@ -6,10 +6,9 @@ import pandas as pd
 import pytest
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.assemble_validated_events import (
+from data_pipeline.assembly.assembly_logic import log_info, log_error
+from data_pipeline.assembly.assembly_executor import (
     init_report,
-    log_info,
-    log_error,
     merge_data,
     derive_fields,
     freeze_schema,

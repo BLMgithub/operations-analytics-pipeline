@@ -6,13 +6,17 @@ import pandas as pd
 import pytest
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.build_bi_semantic_layer import (
+from data_pipeline.semantic.semantic_executor import (
     init_report,
     log_error,
     log_info,
     SEMANTIC_MODULES,
-    build_seller_semantic,
     build_semantic_layer,
+)
+from data_pipeline.semantic.semantic_logic import (
+    build_seller_semantic,
+    build_customer_semantic,
+    build_product_semantic,
 )
 
 

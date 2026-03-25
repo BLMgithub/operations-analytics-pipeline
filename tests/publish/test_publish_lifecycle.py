@@ -8,15 +8,13 @@ import shutil
 from pathlib import Path
 
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.build_bi_semantic_layer import SEMANTIC_MODULES
-from data_pipeline.stages.publish_lifecycle import (
-    init_report,
-    log_info,
-    log_error,
+from data_pipeline.semantic.semantic_executor import SEMANTIC_MODULES
+from data_pipeline.publish.publish_executor import (
     run_integrity_gate,
     promote_semantic_version,
     execute_publish_lifecycle,
 )
+from data_pipeline.publish.publish_logic import init_report, log_info, log_error
 
 
 @pytest.fixture

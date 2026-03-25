@@ -1,5 +1,5 @@
 # =============================================================================
-# PUBLISH ACTIVATION GATE
+# Publish Stage Logic
 # =============================================================================
 
 import pandas as pd
@@ -11,7 +11,7 @@ import os
 
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.build_bi_semantic_layer import SEMANTIC_MODULES
+from data_pipeline.semantic.semantic_executor import SEMANTIC_MODULES
 from data_pipeline.shared.storage_adapter import (
     upload_publish_artifacts,
     _split_gcs_path,
@@ -162,7 +162,6 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
 
     report = init_report()
 
-    ## semantic_path = run_context.semantic_path
     version_path = Path(run_context.version_path)
 
     if version_path.exists():
@@ -170,20 +169,6 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
         log_error("Version directory already exists", report)
 
         return report
-
-    # Create version directory
-    ## try:
-    ##     version_path.mkdir(parents=True, exist_ok=False)
-
-    # REPLACED with with GCS adapter
-
-    ## for module_name in SEMANTIC_MODULES:
-    ##     source_module_path = semantic_path / module_name
-    ##   target_module_path = version_path / module_name
-
-    # Copy validated semantics to version directory
-
-    ## shutil.copytree(source_module_path, target_module_path)
 
     try:
         upload_publish_artifacts(run_context)
@@ -278,67 +263,3 @@ def activate_published_version(run_context: RunContext) -> Dict:
             log_error(str(e), report)
 
     return report
-
-
-# ------------------------------------------------------------
-# RUN PUBLISH LIFECYCLE
-# ------------------------------------------------------------
-
-
-def execute_publish_lifecycle(run_context: RunContext) -> Dict:
-    """
-    Execute full publish lifecycle for semantic artifacts.
-
-    Execution steps:
-    - Run semantic integrity gate
-    - Promote validated artifacts into version directory
-    - Atomically activate published pointer
-
-    Guarantees:
-    - Only fully validated semantic versions become visible to BI.
-
-    Failure behavior:
-    - Any step failure halts publish lifecycle and prevents activation.
-    """
-
-    report = {
-        "status": "success",
-        "steps": {},
-    }
-
-    def fail_step(step_name):
-        report["status"] = "failed"
-        report["failed_step"] = step_name
-
-        return report
-
-    validate_semantic = run_integrity_gate(run_context)
-    report["steps"]["integrity_gate"] = validate_semantic
-
-    if validate_semantic["status"] == "failed":
-        return fail_step("integrity_gate")
-
-    log_info("Pre-publishing validation passed", validate_semantic)
-
-    promote_semantic = promote_semantic_version(run_context)
-    report["steps"]["promotion"] = promote_semantic
-
-    if promote_semantic["status"] == "failed":
-        return fail_step("promotion")
-
-    log_info("Semantic artifacts promoted successfully", promote_semantic)
-
-    published_activation = activate_published_version(run_context)
-    report["steps"]["activation"] = published_activation
-
-    if published_activation["status"] == "failed":
-        return fail_step("activation")
-
-    log_info("Atomic pointer swap successful", published_activation)
-
-    return report
-
-
-# =============================================================================
-# END OF SCRIPT
-# =============================================================================

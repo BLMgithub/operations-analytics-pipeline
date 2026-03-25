@@ -1,18 +1,13 @@
 # =============================================================================
-# Assemble Validated Event Data
+# Assembly Events Stage logic
 # =============================================================================
-# - Combine validated raw datasets into a unified event-level dataset
-# - Enforce explicit join paths, keys, and cardinality assumptions
-# - Preserve event grain and temporal semantics during assembly
-# - Produce a deterministic, audit-ready event dataset for fact derivation
-
 
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Callable, Any, List
 from data_pipeline.shared.run_context import RunContext
+from data_pipeline.shared.loader_exporter import load_historical_table
 from data_pipeline.shared.modeling_configs import ASSEMBLE_SCHEMA, ASSEMBLE_DTYPES
-from data_pipeline.shared.loader_exporter import load_historical_table, export_file
 
 EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
 
@@ -58,7 +53,7 @@ def log_error(message: str, report: Dict[str, list[str]]) -> None:
 # ------------------------------------------------------------
 
 
-def merge_data(tables: dict) -> pd.DataFrame:
+def merge_data(tables: Dict) -> pd.DataFrame:
     """
     Core event assembly join.
 
@@ -201,166 +196,66 @@ def dimension_references(
 
 
 # ------------------------------------------------------------
-# DATA ASSEMBLING
+# TASK WRAPPERS
 # ------------------------------------------------------------
 
 
-def assemble_events(run_context: RunContext) -> Dict:
+def task_wrapper(
+    step_name: str,
+    report: Dict,
+    func: Callable,
+    *args,
+) -> tuple[bool, Any]:
     """
-    Assemble contract-compliant event dataset (order grain).
+    Unified task runner that handles logging, reporting, and execution.
 
-    Steps:
-    - Load contracted event tables
-    - Merge with cardinality enforcement (1 row per order_id)
-    - Derive temporal metrics and lineage fields
-    - Freeze schema and enforce dtypes
-    - Export deterministic output
-
-    Grain:
-    - One row per order_id (hard fail on violation)
+    Returns:
+        Success Boolean, Result Data
     """
+    step_report = report["steps"][step_name]
 
-    report = {
-        "status": "success",
-        "steps": {
-            "load_tables": init_report(),
-            "merge_events": init_report(),
-            "derive_fields": init_report(),
-            "freeze_schema": init_report(),
-            "export": init_report(),
-            "dim_ref_report": init_report(),
-        },
-    }
+    try:
+        result = func(*args)
 
-    def fail_step(step_name):
-        report["status"] = "failed"
-        report["failed_step"] = step_name
+        if result is None:
+            step_report["status"] = "failed"
+            return False, None
 
-        return report
+        step_report["status"] = "success"
+        log_info(f"Step {step_name} completed successfully.", step_report)
+        return True, result
+
+    except Exception as e:
+        log_error(f"Step {step_name} failed: {str(e)}", step_report)
+        step_report["status"] = "failed"
+
+        return False, None
+
+
+def load_event_table(run_context: RunContext, report: Dict) -> Any:
 
     contracted_path = run_context.contracted_path
-
     tables = {}
-    load_report = report["steps"]["load_tables"]
 
     for table_name in EVENT_TABLES:
-
         df = load_historical_table(
             contracted_path,
             table_name,
-            log_info=lambda msg: log_info(msg, load_report),
+            log_info=lambda msg: log_info(msg, report),
         )
 
-        if df is None:
-            log_error(f"{table_name}: dataset is empty", load_report)
-            load_report["status"] = "failed"
+        if df is not None:
+            tables[table_name] = df
 
-            return fail_step("load_tables")
+    return tables
 
-        tables[table_name] = df
 
-    log_info("Tables loaded successfully", load_report)
-
-    # MERGING DATAFRAMES
-    merge_report = report["steps"]["merge_events"]
-
-    try:
-        df_merged = merge_data(tables)
-
-    except Exception as e:
-        log_error(str(e), merge_report)
-        merge_report["status"] = "failed"
-
-        return fail_step("merge_events")
-
-    log_info(f"Merge completed successfully ({len(df_merged)} rows)", merge_report)
-
-    # DERIVING COLUMNS
-    derive_report = report["steps"]["derive_fields"]
-
-    try:
-        df_assembled = derive_fields(df_merged, run_context.run_id)
-
-    except Exception as e:
-        log_error(str(e), derive_report)
-        derive_report["status"] = "failed"
-
-        return fail_step("derive_fields")
-
-    log_info("Fields derived successfully", derive_report)
-
-    # FREEZING SCHEMA
-    freeze_report = report["steps"]["freeze_schema"]
-
-    try:
-        df_contract = freeze_schema(df_assembled)
-
-    except Exception as e:
-        log_error(str(e), freeze_report)
-        freeze_report["status"] = "failed"
-
-        return fail_step("freeze_schema")
-
-    log_info("Schema freeze completed successfully", freeze_report)
-
-    # EXPORTING ASSEMBLED DATA
-    export_report = report["steps"]["export"]
-
+def export_path(run_context: RunContext, file_name: str) -> Path:
     year = run_context.run_id[:4]
     month = run_context.run_id[4:6]
     day = run_context.run_id[6:8]
 
-    output_path = (
-        run_context.assembled_path / f"assembled_events_{year}_{month}_{day}.parquet"
-    )
+    file_name = f"{file_name}_{year}_{month}_{day}.parquet"
+    output_path = run_context.assembled_path / file_name
 
-    if not export_file(df_contract, output_path):
-        log_error("Export failed", export_report)
-        export_report["status"] = "failed"
-
-        return fail_step("export")
-
-    log_info(
-        f"Export success: assembled_events_{year}_{month}_{day}.parquet ({len(df_contract)} rows)",
-        export_report,
-    )
-
-    # DIMENSION REFERENCES
-    dim_report = report["steps"]["dim_ref_report"]
-
-    for table, config in DIMENSION_REFERENCES.items():
-
-        try:
-            df = load_historical_table(contracted_path, table)
-
-            df_dim = dimension_references(
-                df, table, config["primary_key"], config["required_column"]
-            )
-
-            dim_output = (
-                run_context.assembled_path / f"{table}_{year}_{month}_{day}.parquet"
-            )
-
-            if not export_file(df_dim, dim_output):
-                log_error(f"Export failed for {table}", dim_report)
-                dim_report["status"] = "failed"
-
-                return fail_step("dim_reference")
-
-            log_info(
-                f"Export success: Dimension reference {table} ({len(df_dim)} rows)",
-                dim_report,
-            )
-
-        except Exception as e:
-            log_error(str(e), dim_report)
-            dim_report["status"] = "failed"
-
-            return fail_step("dim_reference")
-
-    return report
-
-
-# =============================================================================
-# END OF SCRIPT
-# =============================================================================
+    return output_path

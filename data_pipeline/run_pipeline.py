@@ -2,6 +2,7 @@
 # PIPELINE EXECUTOR
 # =============================================================================
 
+
 from pathlib import Path
 from datetime import datetime as dt
 import json
@@ -11,11 +12,11 @@ import gc
 
 from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.stages.validate_raw_data import apply_validation
-from data_pipeline.stages.apply_raw_data_contract import apply_contract
-from data_pipeline.stages.assemble_validated_events import assemble_events
-from data_pipeline.stages.build_bi_semantic_layer import build_semantic_layer
-from data_pipeline.stages.publish_lifecycle import execute_publish_lifecycle
+from data_pipeline.validation.validation_executor import apply_validation
+from data_pipeline.contract.contract_executor import apply_contract
+from data_pipeline.assembly.assembly_executor import assemble_events
+from data_pipeline.semantic.semantic_executor import build_semantic_layer
+from data_pipeline.publish.publish_executor import execute_publish_lifecycle
 
 from data_pipeline.shared.storage_adapter import (
     download_raw_snapshot,
@@ -29,22 +30,6 @@ from data_pipeline.shared.storage_adapter import (
 # SUPPORTING UTILITIES
 # ------------------------------------------------------------
 
-# REPLACED with GCS adapter
-
-# def snapshot_raw_storage(run_context: RunContext) -> None:
-#     """
-#     Creates a run-scoped raw snapshot by copying the entire source raw
-#     directory into the run context.
-#     """
-
-#     source = run_context.storage_raw_path
-#     destination = run_context.raw_snapshot_path
-
-#     if not source.exists():
-#         raise FileNotFoundError(f"Raw source path not found: {source}")
-
-#     copytree(source, destination, dirs_exist_ok=True)
-
 
 def persist_json(path: Path, payload: dict) -> None:
     """
@@ -53,6 +38,14 @@ def persist_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)
+
+
+def stage_logger(run_context: RunContext, stage: str, report: dict | list):
+
+    persist_json(
+        path=run_context.logs_path / f"{stage}.json",
+        payload={"run_id": run_context.run_id, "report": report},
+    )
 
 
 def initiliaze_metadata(run_context: RunContext) -> None:
@@ -67,7 +60,7 @@ def initiliaze_metadata(run_context: RunContext) -> None:
 
     payload = {
         "run_id": run_context.run_id,
-        "pipeline_version": "v3.1",
+        "pipeline_version": "v4",
         "status": "RUNNING",
         "started_at": dt.utcnow().isoformat(),
         "run_year": run_dt.year,
@@ -107,24 +100,20 @@ def finalize_metadata(run_context: RunContext, status: str) -> None:
 
 
 # ------------------------------------------------------------
-# STAGES WRAPPERS
+# STAGE WRAPPERS
 # ------------------------------------------------------------
 
 
 def run_initial_validation_stage(run_context) -> None:
 
     report = apply_validation(run_context)
-    persist_json(
-        path=run_context.logs_path / "initial_validation.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
+    stage_logger(run_context, stage="initial_validation", report=report)
 
     if report["errors"]:
         raise RuntimeError("Stage failure: Initial Validation")
 
 
 def run_contract_application_stage(run_context) -> tuple[set, set]:
-
     report = []
 
     # Accumulates set of invalid order_ids and valid order_ids, and apply to child tables.
@@ -135,10 +124,7 @@ def run_contract_application_stage(run_context) -> tuple[set, set]:
     for table_name in TABLE_CONFIG:
 
         contract, new_inv, new_val = apply_contract(
-            run_context,
-            table_name,
-            invalid_ids,
-            valid_ids,
+            run_context, table_name, invalid_ids, valid_ids
         )
 
         invalid_ids |= new_inv
@@ -147,11 +133,7 @@ def run_contract_application_stage(run_context) -> tuple[set, set]:
 
         report.append(contract)
 
-    persist_json(
-        path=run_context.logs_path / "contract_application.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
-
+    stage_logger(run_context, stage="contract_application", report=report)
     return invalid_ids, valid_ids
 
 
@@ -159,50 +141,34 @@ def run_post_contract_validation_stage(run_context) -> None:
 
     # Checks contracted datasets directory
     report = apply_validation(run_context, base_path=run_context.contracted_path)
-
-    persist_json(
-        path=run_context.logs_path / "post_contract_validation.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
+    stage_logger(run_context, stage="post_contract_validation", report=report)
 
     if report["errors"] or report["warnings"]:
         raise RuntimeError("Stage failure: Post Contract Validation")
 
 
-def run_assemble_events(run_context) -> None:
+def run_assemble_events_stage(run_context) -> None:
 
     report = assemble_events(run_context)
-
-    persist_json(
-        path=run_context.logs_path / "assemble_events.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
+    stage_logger(run_context, stage="assemble_events", report=report)
 
     if report["status"] == "failed":
         raise RuntimeError("Stage failure: Assemble Events")
 
 
-def run_semantic_modeling(run_context) -> None:
+def run_semantic_modeling_stage(run_context) -> None:
 
     report = build_semantic_layer(run_context)
-
-    persist_json(
-        path=run_context.logs_path / "semantic_report.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
+    stage_logger(run_context, stage="semantic_modeling", report=report)
 
     if report["status"] == "failed":
         raise RuntimeError("Stage failure: Semantic Modeling")
 
 
-def run_prepublishing_validation(run_context) -> None:
+def run_prepublishing_validation_stage(run_context) -> None:
 
     report = execute_publish_lifecycle(run_context)
-
-    persist_json(
-        path=run_context.logs_path / "publish_report.json",
-        payload={"run_id": run_context.run_id, "report": report},
-    )
+    stage_logger(run_context, stage="prepublishing_validation", report=report)
 
     if report["status"] == "failed":
         raise RuntimeError("Stage failure: Semantic Publishing")
@@ -260,7 +226,7 @@ def main() -> None:
         # Persist delta contracted datasets to silver storage
         upload_contracted_directory(run_context)
 
-        # Clear RAM memory from previous stages
+        # Clear RAM memory from previous
         if os.path.exists(run_context.raw_snapshot_path):
             shutil.rmtree(run_context.raw_snapshot_path)
             shutil.rmtree(run_context.contracted_path)
@@ -270,13 +236,13 @@ def main() -> None:
         run_context.contracted_path.mkdir(parents=True, exist_ok=True)
         download_contracted_datasets(run_context)
 
-        run_assemble_events(run_context)
+        run_assemble_events_stage(run_context)
         gc.collect()
 
-        run_semantic_modeling(run_context)
+        run_semantic_modeling_stage(run_context)
         gc.collect()
 
-        run_prepublishing_validation(run_context)
+        run_prepublishing_validation_stage(run_context)
 
         finalize_metadata(run_context, status="SUCCESS")
 
