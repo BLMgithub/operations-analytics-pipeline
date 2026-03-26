@@ -187,3 +187,31 @@ def enforce_parent_reference(
     removed = initial_count - len(df)
 
     return df, removed
+
+
+def enforce_schema(
+    df: pd.DataFrame, required_column: List[str], dtypes: dict
+) -> tuple[pd.DataFrame, int]:
+    """
+    Finalizes the structural contract via schema projection and type casting.
+
+    Contract:
+    - Schema Projection: Drops all columns not explicitly defined in 'required_column'.
+    - Type Enforcement: Casts remaining columns to the formats defined in 'dtypes'.
+
+    Invariants:
+    - Column Integrity: The output column count and order strictly match 'required_column'.
+    - Type Safety: Ensures the dataset is ready for downstream analytical joins (e.g., matching IDs).
+
+    Returns:
+        tuple: (Filtered DataFrame, Integer count of columns removed).
+    """
+
+    initial_col_count = len(df.columns)
+
+    df = df[required_column]
+    df = df.astype(dtypes)
+
+    removed = initial_col_count - len(df.columns)
+
+    return df, removed

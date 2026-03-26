@@ -2,10 +2,6 @@
 # TABLE CONFIGURATIONS RAW DATA
 # =============================================================================
 
-# ------------------------------------------------------------
-# CONFIGURATIONS FOR validate_raw_data.py
-# ------------------------------------------------------------
-
 TABLE_CONFIG = {
     "df_orders": {
         "role": "event_fact",
@@ -25,6 +21,15 @@ TABLE_CONFIG = {
             "order_status",
             "order_purchase_timestamp",
         ],
+        "dtypes": {
+            "order_id": "string",
+            "customer_id": "string",
+            "order_status": "category",
+            "order_purchase_timestamp": "datetime64[ns]",
+            "order_approved_at": "datetime64[ns]",
+            "order_delivered_timestamp": "datetime64[ns]",
+            "order_estimated_delivery_date": "datetime64[ns]",
+        },
     },
     "df_order_items": {
         "role": "transaction_detail",
@@ -41,12 +46,19 @@ TABLE_CONFIG = {
             "seller_id",
             "price",
         ],
+        "dtypes": {
+            "order_id": "string",
+            "product_id": "string",
+            "seller_id": "string",
+            "price": "float32",
+        },
     },
     "df_customers": {
         "role": "entity_reference",
         "primary_key": ["customer_id"],
         "required_column": [
             "customer_id",
+            "customer_state",
             "customer_city",
             "customer_segment",
             "account_creation_date",
@@ -54,7 +66,17 @@ TABLE_CONFIG = {
         "non_nullable_column": [
             "customer_id",
             "customer_state",
+            "customer_city",
+            "customer_segment",
+            "account_creation_date",
         ],
+        "dtypes": {
+            "customer_id": "string",
+            "customer_state": "category",
+            "customer_city": "category",
+            "customer_segment": "category",
+            "account_creation_date": "datetime64[ns]",
+        },
     },
     "df_payments": {
         "role": "transaction_detail",
@@ -62,11 +84,18 @@ TABLE_CONFIG = {
         "required_column": [
             "order_id",
             "payment_value",
+            "payment_sequential",
         ],
         "non_nullable_column": [
             "order_id",
             "payment_value",
+            "payment_sequential",
         ],
+        "dtypes": {
+            "order_id": "string",
+            "payment_value": "float32",
+            "payment_sequential": "int8",
+        },
     },
     "df_products": {
         "role": "entity_reference",
@@ -84,14 +113,29 @@ TABLE_CONFIG = {
         "non_nullable_column": [
             "product_id",
             "product_category_name",
+            "product_length_cm",
+            "product_height_cm",
+            "product_width_cm",
+            "product_fragility_index",
             "product_weight_g",
+            "supplier_tier",
         ],
+        "dtypes": {
+            "product_id": "string",
+            "product_category_name": "category",
+            "product_length_cm": "float32",
+            "product_height_cm": "float32",
+            "product_width_cm": "float32",
+            "product_fragility_index": "category",
+            "product_weight_g": "float32",
+            "supplier_tier": "category",
+        },
     },
 }
 
 
 # ------------------------------------------------------------
-# CONFIGURATIONS FOR apply_raw_data_contract.py
+# CONFIGURATIONS FOR Contract Stage
 # ------------------------------------------------------------
 
 REQUIRED_TIMESTAMPS = [

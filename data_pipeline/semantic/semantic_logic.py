@@ -64,6 +64,7 @@ def build_seller_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     seller_weekly_fact = df.groupby(
         ["seller_id", "order_year_week"],
         as_index=False,
+        observed=True,
     ).agg(
         week_start_date=("week_start_date", "min"),
         run_id=("run_id", "first"),
@@ -81,6 +82,7 @@ def build_seller_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     seller_dim = df.groupby(
         "seller_id",
         as_index=False,
+        observed=True,
     ).agg(
         first_order_date=("order_date", "min"),
         first_order_year_week=("order_year_week", "min"),
@@ -131,6 +133,7 @@ def build_customer_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     customer_weekly_fact = df.groupby(
         ["customer_id", "order_year_week"],
         as_index=False,
+        observed=True,
     ).agg(
         week_start_date=("week_start_date", "min"),
         run_id=("run_id", "first"),
@@ -193,6 +196,7 @@ def build_product_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     product_weekly_fact = df.groupby(
         ["product_id", "order_year_week"],
         as_index=False,
+        observed=True,
     ).agg(
         week_start_date=("week_start_date", "min"),
         run_id=("run_id", "first"),

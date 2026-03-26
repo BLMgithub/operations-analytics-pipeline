@@ -76,9 +76,7 @@ def run_base_validations(
 
     missing_required = sorted(required - actual)
     if missing_required:
-        log_error(
-            f"{table_name}: missing required column(s): {missing_required}", report
-        )
+        log_error(f"{table_name}: missing required columns: {missing_required}", report)
 
     if missing_required:
         return False
@@ -86,7 +84,7 @@ def run_base_validations(
     missing_pk_columns = [col for col in primary_key if col not in df.columns]
     if missing_pk_columns:
         log_error(
-            f"{table_name}: missing primary key column(s): {missing_pk_columns}", report
+            f"{table_name}: missing primary key columns: {missing_pk_columns}", report
         )
 
         return False
@@ -117,7 +115,7 @@ def run_base_validations(
 
         if repairable_count > 0:
             log_warning(
-                f"{table_name}: {repairable_count} duplicate row(s) eligible for deduplication",
+                f"{table_name}: {repairable_count} duplicate rows eligible for deduplication",
                 report,
             )
 
@@ -131,7 +129,7 @@ def run_base_validations(
     pk_null_count = df[primary_key].isnull().any(axis=1).sum()
     if pk_null_count > 0:
         log_warning(
-            f"{table_name}: {pk_null_count} row(s) with null primary key values", report
+            f"{table_name}: {pk_null_count} rows with null primary key values", report
         )
 
     # Null rows in non nullable columns
@@ -170,7 +168,7 @@ def run_event_fact_validations(
     missing_ts_columns = [col for col in REQUIRED_TIMESTAMPS if col not in df.columns]
     if missing_ts_columns:
         log_error(
-            f"{table_name}: missing required timestamp column(s): {missing_ts_columns}",
+            f"{table_name}: missing required timestamp columns: {missing_ts_columns}",
             report,
         )
 
@@ -189,7 +187,7 @@ def run_event_fact_validations(
         invalid_count = ts.isna().sum()
         if invalid_count > 0:
             log_warning(
-                f"{table_name}: {invalid_count} unparsable timestamp value(s) in {col}",
+                f"{table_name}: {invalid_count} unparsable timestamp values in {col}",
                 report,
             )
 
@@ -201,14 +199,14 @@ def run_event_fact_validations(
     invalid_approval = (approved_ts < purchase_ts).sum()
     if invalid_approval > 0:
         log_warning(
-            f"{table_name}: {invalid_approval} record(s) where approval precedes purchase",
+            f"{table_name}: {invalid_approval} records where approval precedes purchase",
             report,
         )
 
     invalid_delivery = (delivered_ts < purchase_ts).sum()
     if invalid_delivery > 0:
         log_warning(
-            f"{table_name}: {invalid_delivery} record(s) where delivery precedes purchase",
+            f"{table_name}: {invalid_delivery} records where delivery precedes purchase",
             report,
         )
 
@@ -235,7 +233,7 @@ def run_transaction_detail_validations(
         negative_count = (df[col] < 0).sum()
         if negative_count > 0:
             log_error(
-                f"{table_name}: {negative_count} negative value(s) in numeric column `{col}`",
+                f"{table_name}: {negative_count} negative values in numeric column `{col}`",
                 report,
             )
 
@@ -266,7 +264,7 @@ def run_cross_table_validations(
 
     if missing_tables:
         log_info(
-            f"Cross-table validation skipped: missing required table(s): {missing_tables}",
+            f"Cross-table validation skipped: missing required tables: {missing_tables}",
             report,
         )
 
@@ -283,7 +281,7 @@ def run_cross_table_validations(
     orphan_items = ~order_items_df["order_id"].isin(order_id_set)
     if orphan_items.any():
         log_warning(
-            f"df_order_items: {orphan_items.sum()} orphan record(s) referencing non-existent order_id",
+            f"df_order_items: {orphan_items.sum()} orphan records referencing non-existent order_id",
             report,
         )
 
@@ -291,7 +289,7 @@ def run_cross_table_validations(
     orphan_payments = ~payments_df["order_id"].isin(order_id_set)
     if orphan_payments.any():
         log_warning(
-            f"df_payments: {orphan_payments.sum()} orphan record(s) referencing non-existent order_id",
+            f"df_payments: {orphan_payments.sum()} orphan records referencing non-existent order_id",
             report,
         )
 

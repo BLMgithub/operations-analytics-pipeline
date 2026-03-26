@@ -113,40 +113,33 @@ def derive_fields(df: pd.DataFrame, run_id: str) -> pd.DataFrame:
     - [Undetermined] - Assumes source timestamps have passed the 'remove_unparsable_timestamps' contract.
     """
 
-    df_derived = df.copy()
-
     for col in [
         "order_purchase_timestamp",
         "order_approved_at",
         "order_delivered_timestamp",
         "order_estimated_delivery_date",
     ]:
-        df_derived[col] = pd.to_datetime(df_derived[col])
+        df[col] = pd.to_datetime(df[col])
 
-    df_derived["lead_time_days"] = (
-        df_derived["order_delivered_timestamp"] - df_derived["order_approved_at"]
+    df["lead_time_days"] = (
+        df["order_delivered_timestamp"] - df["order_approved_at"]
     ).dt.days
 
-    df_derived["approval_lag_days"] = (
-        df_derived["order_approved_at"] - df_derived["order_purchase_timestamp"]
+    df["approval_lag_days"] = (
+        df["order_approved_at"] - df["order_purchase_timestamp"]
     ).dt.days
 
-    df_derived["delivery_delay_days"] = (
-        df_derived["order_delivered_timestamp"]
-        - df_derived["order_estimated_delivery_date"]
+    df["delivery_delay_days"] = (
+        df["order_delivered_timestamp"] - df["order_estimated_delivery_date"]
     ).dt.days
 
-    df_derived["order_date"] = df_derived["order_purchase_timestamp"].dt.date
-    df_derived["order_year"] = df_derived["order_purchase_timestamp"].dt.year
-    df_derived["order_week_iso"] = df_derived["order_purchase_timestamp"].dt.strftime(
-        "W%V"
-    )
-    df_derived["order_year_week"] = df_derived["order_purchase_timestamp"].dt.strftime(
-        "%G-W%V"
-    )
-    df_derived["run_id"] = run_id
+    df["order_date"] = df["order_purchase_timestamp"].dt.date
+    df["order_year"] = df["order_purchase_timestamp"].dt.year
+    df["order_week_iso"] = df["order_purchase_timestamp"].dt.strftime("W%V")
+    df["order_year_week"] = df["order_purchase_timestamp"].dt.strftime("%G-W%V")
+    df["run_id"] = run_id
 
-    return df_derived
+    return df
 
 
 def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -170,7 +163,7 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
     if missing_cols:
         raise RuntimeError(f"missing required columns: {sorted(missing_cols)}")
 
-    df_contract = df[ASSEMBLE_SCHEMA].copy()
+    df_contract = df[ASSEMBLE_SCHEMA]
     df_contract = df_contract.astype(ASSEMBLE_DTYPES)
     df_contract = df_contract.sort_values("order_id").reset_index(drop=True)
 
@@ -203,7 +196,7 @@ def dimension_references(
     - Raises RuntimeError if 'primary_key' duplicates persist after extraction.
     """
 
-    df_dim = df[req_column].drop_duplicates(subset=primary_key).copy()
+    df_dim = df[req_column].drop_duplicates(subset=primary_key)
 
     if df_dim[primary_key].duplicated().any():
         raise RuntimeError(f"Duplicated {primary_key} detected in {table_name}")

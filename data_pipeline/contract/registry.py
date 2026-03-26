@@ -9,6 +9,7 @@ from data_pipeline.contract.contract_logic import (
     remove_rows_with_null_constraint,
     cascade_drop_by_order_id,
     enforce_parent_reference,
+    enforce_schema,
 )
 
 ROLE_STEPS = {
@@ -37,6 +38,12 @@ ROLE_STEPS = {
             "args": ["non_nullable"],
             "return_invalid_ids": True,
         },
+        {
+            "contract": enforce_schema,
+            "metric": "removed_column",
+            "args": ["required_column"],
+            "return_invalid_ids": False,
+        },
     ],
     "transaction_detail": [
         {
@@ -63,6 +70,12 @@ ROLE_STEPS = {
             "args": ["valid_order_ids"],
             "return_invalid_ids": False,
         },
+        {
+            "contract": enforce_schema,
+            "metric": "removed_column",
+            "args": ["required_column"],
+            "return_invalid_ids": False,
+        },
     ],
     "entity_reference": [
         {
@@ -76,6 +89,12 @@ ROLE_STEPS = {
             "metric": "removed_null_values",
             "args": ["non_nullable"],
             "return_invalid_ids": True,
+        },
+        {
+            "contract": enforce_schema,
+            "metric": "removed_column",
+            "args": ["required_column"],
+            "return_invalid_ids": False,
         },
     ],
 }

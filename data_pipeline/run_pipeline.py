@@ -67,6 +67,7 @@ def initiliaze_metadata(run_context: RunContext) -> None:
         "run_month": run_dt.month,
         "run_week_of_month": (run_dt.day - 1) // 7 + 1,
         "completed_at": None,
+        "run_duration": None,
         "published": False,
     }
 
@@ -87,14 +88,18 @@ def finalize_metadata(run_context: RunContext, status: str) -> None:
     with open(run_context.metadata_path, "r") as file:
         payload = json.load(file)
 
+    completion_time = dt.utcnow()
+
     payload["status"] = status
-    payload["completed_at"] = dt.utcnow().isoformat()
+    payload["completed_at"] = completion_time.isoformat()
 
-    if status == "SUCCESS":
-        payload["published"] = True
+    start_time = dt.fromisoformat(payload["started_at"])
+    duration = completion_time - start_time
 
-    else:
-        payload["published"] = False
+    mm, ss = divmod(int(duration.total_seconds()), 60)
+    payload["run_duration"] = f"{mm:02d}m {ss:02d}s"
+
+    payload["published"] = True if status == "SUCCESS" else False
 
     persist_json(run_context.metadata_path, payload)
 
@@ -186,11 +191,12 @@ def main() -> None:
     Execution order:
     1. Snapshot raw data
     2. Initialize metadata (RUNNING)
-    3. Validation → halt on errors
+    3. Validation
     4. Contract enforcement
         - Apply role-driven repair
         - Propagate invalid order_ids (parent → child)
-    5. Re-validation → halt on errors/warnings
+        - Propogate valida order_ids (parent → child)
+    5. Re-validation
     6. Assemble event table
     7. Build semantic layer
     8. Pre-publish integrity gate
@@ -226,13 +232,13 @@ def main() -> None:
         # Persist delta contracted datasets to silver storage
         upload_contracted_directory(run_context)
 
-        # Clear RAM memory from previous
+        # Clear RAM memory from previous stages
         if os.path.exists(run_context.raw_snapshot_path):
             shutil.rmtree(run_context.raw_snapshot_path)
             shutil.rmtree(run_context.contracted_path)
         gc.collect()
 
-        # Recreate path and download contract compliant data from silver storage
+        # Recreate path and download contract data from silver storage
         run_context.contracted_path.mkdir(parents=True, exist_ok=True)
         download_contracted_datasets(run_context)
 

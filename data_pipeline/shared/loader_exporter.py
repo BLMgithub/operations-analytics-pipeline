@@ -108,7 +108,9 @@ def export_file(
             df.to_csv(output_path, index=index)
 
         elif ext == ".parquet":
-            df.to_parquet(output_path, index=index, engine="pyarrow")
+            df.to_parquet(
+                output_path, index=index, engine="pyarrow", compression="brotli"
+            )
 
         else:
             raise ValueError(
