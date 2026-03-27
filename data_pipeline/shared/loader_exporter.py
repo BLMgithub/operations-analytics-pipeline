@@ -19,9 +19,20 @@ def load_single_delta(
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Tuple[pd.DataFrame, str]:
     """
-    Loads the MOST RECENT delta file for a specific logical table.
-    Relies on YYYY_MM_DD suffix for chronological sorting.
+    Loads the chronologically most recent delta for a logical table.
+
+    Contract:
+    - Scans 'base_path' for files matching the 'table_name' prefix.
+    - Identifies the target file via alphanumeric sorting of the date suffix (YYYY_MM_DD).
+
+    Invariants:
+    - Recency: Only the latest snapshot is returned; historical deltas are ignored.
+    - Format Support: Handles .csv and .parquet (prioritizing Parquet).
+
+    Failures:
+    - Raises FileNotFoundError if no matching artifacts are found.
     """
+
     base_path = Path(base_path)
 
     # Find files matching the table prefix
@@ -57,7 +68,14 @@ def load_historical_table(
     log_info: Optional[Callable[[str], None]] = None,
 ) -> pd.DataFrame:
     """
-    Loads and concatenates ALL Parquet files for a logical table.
+    Aggregates all matching artifacts into a single cumulative DataFrame.
+
+    Contract:
+    - Performs a multi-file read of all artifacts matching the 'table_name'.
+    - Concatenates results into a single memory object with index resetting.
+
+    Outputs:
+    - Returns a unified DataFrame. Returns None if no files exist.
     """
     base_path = Path(base_path)
 
@@ -92,11 +110,20 @@ def export_file(
     index: bool = False,
 ) -> bool:
     """
-    Export DataFrame based on file extension (.csv or .parquet).
+    Persists DataFrames to disk using system-standard technical formats.
 
-    Returns True if successful, False otherwise.
+    Contract:
+    - Automates directory creation for the target 'output_path'.
+    - Enforces Parquet with Brotli compression as the internal standard.
 
+    Invariants:
+    - Format Determinism: File extension (.csv vs .parquet) dictates the engine used.
+    - Compression: Parquet exports always utilize 'brotli' to optimize storage.
+
+    Returns:
+        bool: True if write succeeded, False on I/O exception.
     """
+
     output_path = Path(output_path)
 
     try:

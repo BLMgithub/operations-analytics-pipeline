@@ -1,95 +1,48 @@
 # =============================================================================
-# GOOGLE DRIVE FILE EXTRACTOR
+# Google Drive Extractor Orchestrator
 # =============================================================================
 
 import sys
 import json
 import uuid
 from data_extract.shared.utils import (
-    extract_file_content,
-    check_handshake,
     get_drive_service,
     check_gcs_marking,
     upload_to_gcs,
     get_target_folder_name,
 )
+from data_extract.shared.extract_logic import (
+    ARCHIVAL_BUCKET,
+    get_target_folder_id,
+    get_valid_files,
+    process_extraction,
+)
 
-ARCHIVAL_BUCKET = "gs://operations-archival-bucket"
-PIPELINE_BUCKET = "gs://operations-pipeline-bucket"
-PARENT_FOLDER = "operations-upload-folder"
-MIME_TYPE = "application/vnd.google-apps.folder"
 
+def orchestrate_extract(target_child_folder: str) -> int:
+    """
+    Main orchestrator for the Google Drive to GCS ingestion lifecycle.
 
-# TODO: wrap steps into functions
-def run_extraction(target_child_folder):
+    Contract:
+    - Resolves the specific target folder ID within the 'PARENT_FOLDER' hierarchy.
+    - Enforces a deduplication check via GCS success markers to prevent redundant extraction.
+    - Iteratively processes file extraction, archival, and pipeline mirroring.
+
+    Invariants:
+    - Atomicity: A run is marked as [SUCCESS] only if every file in the target
+      folder is successfully processed and mirrored.
+    - Idempotency: Uses GCS marking paths to skip previously completed folders.
+    - Lineage: Generates a unique 'execution_id' (UUID4) for each orchestration attempt.
+
+    Failures:
+    - Returns 1 if any file extraction fails, the target folder is missing,
+      or the handshake is invalid.
+    - Returns 0 on successful completion or if a deduplication skip is triggered.
+    """
 
     service = get_drive_service()
     metadata_path = f"logs/{target_child_folder}_metadata.json"
     archival_marking_path = f"status/{target_child_folder}.success"
-
-    # Root Folder
-    parent_query = f"name = '{PARENT_FOLDER}' and mimeType = '{MIME_TYPE}'"
-    parent_results = service.files().list(q=parent_query, fields="files(id)").execute()
-    parents = parent_results.get("files", [])
-
-    if not parents:
-        print(f"[ERROR]: Parent folder '{PARENT_FOLDER}' not found or not shared.")
-
-        return 1
-
-    parent_id = parents[0]["id"]
-
-    # Uploaded folder with data
-    child_query = f"name = '{target_child_folder}' and '{parent_id}' in parents and mimeType = '{MIME_TYPE}'"
-    child_results = service.files().list(q=child_query, fields="files(id)").execute()
-    children = child_results.get("files", [])
-
-    if not children:
-        print(
-            f"[ERROR]: Dated folder {target_child_folder} not found inside {PARENT_FOLDER}."
-        )
-
-        return 1
-
-    folder_id = children[0]["id"]
-
-    # Deduplication Check
-    if check_gcs_marking(ARCHIVAL_BUCKET, archival_marking_path):
-        print(f"[INFO]: {target_child_folder} already processed.")
-
-        return 0
-
-    # Find Folder ID by Name
-    query = f"name = '{target_child_folder}' and mimeType = '{MIME_TYPE}'"
-    folder_results = service.files().list(q=query, fields="files(id)").execute()
-    folders = folder_results.get("files", [])
-
-    if not folders:
-        print(f"[ERROR]: Folder {target_child_folder} not found.")
-
-        return 1
-
-    folder_id = folders[0]["id"]
-
-    # Validate upload instruction
-    if not check_handshake(service, folder_id):
-        print(
-            f"[ERROR]: {target_child_folder} missing instruction.txt or upload not safe."
-        )
-
-        return 1
-
-    # List files in folder
-    file_results = (
-        service.files()
-        .list(
-            q=f"'{folder_id}' in parents and name != 'instruction.txt'",
-            fields="files(id, name, mimeType)",
-        )
-        .execute()
-    )
-
-    files_in_drive = file_results.get("files", [])
 
     metadata = {
         "execution_id": str(uuid.uuid4()),
@@ -98,55 +51,55 @@ def run_extraction(target_child_folder):
         "status": "success",
     }
 
+    # Deduplication Check
+    if check_gcs_marking(ARCHIVAL_BUCKET, archival_marking_path):
+        print(f"[INFO]: {target_child_folder} already processed.")
+        return 0
+
+    # Extract target folder id
+    folder_id = get_target_folder_id(target_child_folder, service)
+    if not folder_id:
+        return 1
+
+    # Extract files
+    files_in_drive = get_valid_files(folder_id, target_child_folder, service)
+
+    # Exit if handshake failed or empty list
+    if files_in_drive is None or len(files_in_drive) == 0:
+        return 1
+
     for file in files_in_drive:
 
-        archival_path = f"archive/{target_child_folder}/{file['name']}.csv"
-        pipeline_raw_path = f"raw/{file['name']}.csv"
+        archival_path = f"archive/{target_child_folder}/{file['name']}"
+        pipeline_raw_path = f"raw/{file['name']}"
 
-        try:
-            data = extract_file_content(service, file["id"], file["mimeType"])
+        ok, details = process_extraction(
+            file, service, archival_path, pipeline_raw_path
+        )
 
-            # upload directory to archival
-            upload_to_gcs(ARCHIVAL_BUCKET, archival_path, data)
-
-            # Upload on pipeline/raw/
-            upload_to_gcs(PIPELINE_BUCKET, pipeline_raw_path, data)
-
-            metadata["files_processed"].append(
-                {"name": file["name"], "status": "success"}
-            )
-
-            print(f"[INFO]: {target_child_folder} processed successfully.")
-
-        except Exception as e:
-
-            error_details = {
-                "file_name": file["name"],
-                "drive_id": file["id"],
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-            }
-
-            metadata["errors"].append(error_details)
+        if ok:
+            metadata["files_processed"].append(details)
+        else:
+            metadata["errors"].append(details)
             metadata["status"] = "failed"
 
-            # runtime metadata
+            # Upload failure metadata
             upload_to_gcs(ARCHIVAL_BUCKET, metadata_path, json.dumps(metadata))
-
-            print(f"[ERROR]: Execution halted {str(e)}")
             return 1
 
+    # Upload success metadata and marker
     upload_to_gcs(ARCHIVAL_BUCKET, metadata_path, json.dumps(metadata))
     upload_to_gcs(ARCHIVAL_BUCKET, archival_marking_path, "")
+
+    print(f"[SUCCESS]: Folder '{target_child_folder}' completely processed.")
     return 0
 
 
 def main():
-
     target_folder = get_target_folder_name("operations")
-    print(f"[INFO]: Starting extraction for {target_folder}")
+    print(f"[INFO]: Starting extraction for folder: {target_folder}")
 
-    exit_code = run_extraction(target_folder)
+    exit_code = orchestrate_extract(target_folder)
     sys.exit(exit_code)
 
 

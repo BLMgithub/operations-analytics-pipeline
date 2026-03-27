@@ -1,5 +1,5 @@
 # =============================================================================
-# TABLE CONFIGURATIONS RAW DATA
+# Table configuration for Validation and Contract stage
 # =============================================================================
 
 TABLE_CONFIG = {

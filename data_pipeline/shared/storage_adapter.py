@@ -10,7 +10,10 @@ import shutil
 
 def _split_gcs_path(path: str):
     """
-    Convert gs://bucket/path → (bucket, path)
+    Internal helper for GCS path parsing.
+
+    Contract:
+    - Converts a 'gs://bucket/prefix' string into a (bucket, prefix) tuple.
     """
 
     path = path.replace("gs://", "")
@@ -22,8 +25,13 @@ def _split_gcs_path(path: str):
 
 def download_raw_snapshot(run_context: RunContext) -> None:
     """
-    Download raw snapshot from storage to workspace.
-    Supports local filesystem or GCS source.
+    Synchronizes the raw data snapshot from Cloud Storage to the local workspace.
+
+    Contract:
+    - Downloads files from the 'storage_raw_path' to the local 'raw_snapshot_path'.
+
+    Side Effects:
+    - Reconstructs the source directory structure on the local filesystem.
     """
 
     source = run_context.storage_raw_path
@@ -53,16 +61,11 @@ def download_raw_snapshot(run_context: RunContext) -> None:
 
 def upload_publish_artifacts(run_context: RunContext) -> None:
     """
-    Upload semantic artifacts to storage publish directory.
+    Promotes local Silver-layer artifacts to persistent cloud storage.
 
-    Uploads:
-    - _latest.json
-    - semantic directory
-
-    Destination:
-    version_path/v{run_id}/
-
-    Supports local filesystem or GCS destination.
+    Contract:
+    - Synchronizes the local 'contracted/' directory to 'storage_contracted_path'.
+    - Purpose: Ensures newly cleaned data is archived for delta accumulation.
     """
 
     source = run_context.semantic_path
@@ -88,16 +91,11 @@ def upload_publish_artifacts(run_context: RunContext) -> None:
 
 def upload_run_artifacts(run_context: RunContext) -> None:
     """
-    Persist run audit artifacts to storage.
+    Final promotion of semantic artifacts to the production zone.
 
-    Uploads:
-    - metadata.json
-    - logs directory
-
-    Destination:
-    storage_runs_path/{run_id}/
-
-    Supports local filesystem or GCS destination.
+    Contract:
+    - Mirrors the 'semantic/' directory structure into the 'published/v{run_id}/' zone.
+    - Purpose: Makes validated analytical modules available for production activation.
     """
 
     destination = run_context.storage_runs_path
@@ -139,15 +137,11 @@ def upload_run_artifacts(run_context: RunContext) -> None:
 
 def upload_contracted_directory(run_context: RunContext) -> None:
     """
-    Persist contracted datasets to storage.
+    Promotes local Silver-layer artifacts to the persistent Cloud Silver Storage.
 
-    Uploads:
-    - semantic directory
-
-    Destination:
-    storage_contracted_path/
-
-    Supports local filesystem or GCS destination.
+    Contract:
+    - Synchronizes the local 'contracted/' directory to 'storage_contracted_path'.
+    - Purpose: Archives newly cleaned data for delta accumulation and historical lineage.
     """
 
     source = run_context.contracted_path
@@ -181,8 +175,10 @@ def upload_contracted_directory(run_context: RunContext) -> None:
 
 def download_contracted_datasets(run_context: RunContext) -> None:
     """
-    Download contraced from storage to workspace.
-    Supports local filesystem or GCS source.
+    Populate the reconstructed local contracted/ with full historical delta set from Silver Cloud storage.
+
+    Contract:
+    - Downloads the full accumulated Silver state from 'storage_contracted_path'.
     """
 
     source = run_context.storage_contracted_path
