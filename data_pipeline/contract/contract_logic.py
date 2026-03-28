@@ -125,7 +125,6 @@ def remove_rows_with_null_constraint(
         tuple: (Filtered DataFrame, Count of dropped rows, Set of invalid order_ids)
     """
 
-
     initial_count = len(df)
     invalid_ids = set()
 
