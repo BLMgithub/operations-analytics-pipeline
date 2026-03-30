@@ -75,7 +75,9 @@ def apply_contract(
     required_column = config.get("required_column", [])
     dtypes = config.get("dtypes", {})
 
-    df, filename = load_single_delta(base_path, table_name)
+    df, filename = load_single_delta(
+        engine="Pandas", base_path=base_path, table_name=table_name
+    )
 
     if df is None:
         report["status"] = "failed"

@@ -3,7 +3,9 @@
 # =============================================================================
 
 import gc
-import pandas as pd
+
+# import pandas as pd
+import polars as pl
 from typing import Dict, Any
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.loader_exporter import load_single_delta, export_file
@@ -63,34 +65,41 @@ def task_wrapper(
         return False, None
 
 
-def validate_and_freeze_table(df: pd.DataFrame, meta: dict) -> pd.DataFrame:
+def validate_and_freeze_table(df: pl.DataFrame, table: dict) -> pl.DataFrame:
     """
     Enforces the technical contract for a specific semantic table.
 
     Contract:
-    - Grain: Validates uniqueness of columns defined in meta['grain'].
-    - Schema: Ensures 1:1 match with columns in meta['schema'].
-    - Types: Explicitly casts columns to types defined in meta['dtypes'].
+    - Grain: Validates uniqueness of columns defined in table['grain'].
+    - Schema: Ensures 1:1 match with columns in table['schema'].
+    - Types: Explicitly casts columns to types defined in table['dtypes'].
 
     Behavior:
     - Deterministic Output: Performs a stable sort based on the grain.
     - Fast-Fail: Raises RuntimeError on grain or schema violations.
     """
 
+    # Pandas Implementation
+    # if df.is_duplicated(table["grain"]).any():
+    # df_clean = df[table["schema"]].astype(table["dtypes"])
+    # df_clean = df_clean.sort_values(table["grain"]).reset_index(drop=True)
+
     # Validate duplicates
-    if df.duplicated(meta["grain"]).any():
-        raise RuntimeError(f"Duplicates found in grain: {meta['grain']}")
+
+    # Polars Implementation
+    if df.select(table["grain"]).is_duplicated().any():
+        raise RuntimeError(f"Duplicates found in grain: {table['grain']}")
 
     # Validate required columns
-    missing = set(meta["schema"]) - set(df.columns)
+    missing = set(table["schema"]) - set(df.columns)
     if missing:
         raise RuntimeError(f"Missing required columns: {missing}")
 
     # Enforce dtypes & subset columns
-    df_clean = df[meta["schema"]].astype(meta["dtypes"])
+    df_clean = df.select(table["schema"]).cast(table["dtypes"])
 
     # Deterministic sort
-    df_clean = df_clean.sort_values(meta["grain"]).reset_index(drop=True)
+    df_clean = df_clean.sort(table["grain"])
 
     return df_clean
 
@@ -102,7 +111,7 @@ def validate_and_freeze_table(df: pd.DataFrame, meta: dict) -> pd.DataFrame:
 
 def orchestrate_module(
     run_context: RunContext,
-    df_assembled: pd.DataFrame,
+    df_assembled: pl.DataFrame,
     module_name: str,
     module_config: dict,
     report: dict,
@@ -154,15 +163,15 @@ def orchestrate_module(
             log_error(f"Unexpected table returned: {table_name}", module_report)
             return False
 
-        meta = module_config["tables"][table_name]
+        table = module_config["tables"][table_name]
 
         # Apply Freeze Contract
         ok, df_frozen = task_wrapper(
-            "validate_and_freeze",
-            table_report,
-            validate_and_freeze_table,
-            df_table,
-            meta,
+            step_name="validate_and_freeze",
+            report=table_report,
+            func=validate_and_freeze_table,
+            df=df_table,
+            table=table,
         )
         if not ok:
             return False
@@ -210,12 +219,13 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
     load_report = report["steps"]["load_tables"]
 
     df_assembled, _ = load_single_delta(
-        run_context.assembled_path,
-        "assembled_events",
+        engine="Polars",
+        base_path=run_context.assembled_path,
+        table_name="assembled_events",
         log_info=lambda msg: log_info(msg, load_report),
     )
 
-    if df_assembled is None or df_assembled.empty:
+    if df_assembled is None or df_assembled.is_empty():
         log_error("assembled_events logical table missing or empty", load_report)
         report["status"] = "failed"
         return report

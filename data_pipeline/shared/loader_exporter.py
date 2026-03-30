@@ -3,21 +3,28 @@
 # =============================================================================
 
 from pathlib import Path
+import polars as pl
 import pandas as pd
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Literal, Any
 
 
-FILE_LOADERS = {
+PANDAS_FILE_LOADERS = {
     ".csv": lambda path: pd.read_csv(path),
     ".parquet": lambda path: pd.read_parquet(path, engine="pyarrow"),
 }
 
+POLARS_FILE_LOADERS = {
+    ".csv": lambda path: pl.read_csv(path),
+    ".parquet": lambda path: pl.read_parquet(path, use_pyarrow=True),
+}
+
 
 def load_single_delta(
+    engine: Literal["Pandas", "Polars"],
     base_path: Path | str,
     table_name: str,
     log_info: Optional[Callable[[str], None]] = None,
-) -> Tuple[pd.DataFrame, str]:
+) -> Tuple[Any, str]:
     """
     Loads the chronologically most recent delta for a logical table.
 
@@ -41,7 +48,7 @@ def load_single_delta(
         for file in base_path.iterdir()
         if file.is_file()
         and (file.stem == table_name or file.name.startswith(f"{table_name}_"))
-        and file.suffix.lower() in FILE_LOADERS
+        and file.suffix.lower() in PANDAS_FILE_LOADERS
     ]
 
     if not files:
@@ -52,7 +59,11 @@ def load_single_delta(
     target_file = files[-1]
 
     file_name = target_file.stem
-    loader = FILE_LOADERS[target_file.suffix.lower()]
+
+    if engine == "Pandas":
+        loader = PANDAS_FILE_LOADERS[target_file.suffix.lower()]
+    else:
+        loader = POLARS_FILE_LOADERS[target_file.suffix.lower()]
 
     df = loader(target_file)
 
@@ -66,7 +77,7 @@ def load_historical_table(
     base_path: Path | str,
     table_name: str,
     log_info: Optional[Callable[[str], None]] = None,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Aggregates all matching artifacts into a single cumulative DataFrame.
 
@@ -79,26 +90,33 @@ def load_historical_table(
     """
     base_path = Path(base_path)
 
-    files = [
-        f
-        for f in base_path.iterdir()
-        if f.is_file()
-        and (f.stem == table_name or f.name.startswith(f"{table_name}_"))
-        and f.suffix.lower() == ".parquet"
-    ]
+    # files = [
+    #     f
+    #     for f in base_path.iterdir()
+    #     if f.is_file()
+    #     and (f.stem == table_name or f.name.startswith(f"{table_name}_"))
+    #     and f.suffix.lower() == ".parquet"
+    # ]
+
+    files = list(base_path.glob(f"{table_name}*.parquet"))
 
     if not files:
         raise FileNotFoundError(f"No Parquet files found for {table_name}")
 
-    def get_unified_data(file_list: list[Path]) -> pd.DataFrame:
-        temp_dfs = []
-        for file_path in sorted(file_list):
-            df = pd.read_parquet(file_path, engine="pyarrow")
-            temp_dfs.append(df)
+    # def get_unified_data(file_list: list[Path]) -> pd.DataFrame:
+    #     temp_dfs = []
+    #     for file_path in sorted(file_list):
+    #         df = pd.read_parquet(file_path, engine="pyarrow")
+    #         temp_dfs.append(df)
 
-        return pd.concat(temp_dfs, ignore_index=True)
+    #     return pd.concat(temp_dfs, ignore_index=True)
 
-    df_unified = get_unified_data(files)
+    # df_unified = get_unified_data(files)
+
+    # if log_info:
+    #     log_info(f"Loaded unified: {table_name} ({len(df_unified)} rows)")
+
+    df_unified = pl.read_parquet(files)
 
     if log_info:
         log_info(f"Loaded unified: {table_name} ({len(df_unified)} rows)")
@@ -107,7 +125,7 @@ def load_historical_table(
 
 
 def export_file(
-    df: pd.DataFrame,
+    df: pl.DataFrame | pd.DataFrame,
     output_path: Path,
     log_info: Optional[Callable[[str], None]] = None,
     log_error: Optional[Callable[[str], None]] = None,
@@ -121,7 +139,6 @@ def export_file(
     - Enforces Parquet with Brotli compression as the internal standard.
 
     Invariants:
-    - Format Determinism: File extension (.csv vs .parquet) dictates the engine used.
     - Compression: Parquet exports always utilize 'brotli' to optimize storage.
 
     Returns:
@@ -133,25 +150,31 @@ def export_file(
     try:
         # Ensure parent directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        ext = output_path.suffix.lower()
+        # ext = output_path.suffix.lower()
 
-        if ext == ".csv":
-            df.to_csv(output_path, index=index)
+        # if ext == ".csv":
+        #     df.to_csv(output_path, index=index)
 
-        elif ext == ".parquet":
+        # elif ext == ".parquet":
+        #     df.to_parquet(
+        #         output_path, index=index, engine="pyarrow", compression="brotli"
+        #     )
+
+        # else:
+        #     raise ValueError(
+        #         f'Unsupported file extension: "{ext}". ' "Supported: .csv, .parquet"
+        #     )
+
+        if isinstance(df, pd.DataFrame):
             df.to_parquet(
                 output_path, index=index, engine="pyarrow", compression="brotli"
             )
 
         else:
-            raise ValueError(
-                f'Unsupported file extension: "{ext}". ' "Supported: .csv, .parquet"
-            )
+            df.write_parquet(output_path, compression="brotli")
 
         if log_info:
-            log_info(
-                f"Exported {ext} file: " f"{output_path.name} " f"({len(df)} rows)"
-            )
+            log_info(f"Exported file: " f"{output_path.name} " f"({len(df)} rows)")
 
         return True
 

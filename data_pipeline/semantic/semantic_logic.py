@@ -2,7 +2,8 @@
 # Semantic Modelinc Stage Logic
 # =============================================================================
 
-import pandas as pd
+# import pandas as pd
+import polars as pl
 from typing import Dict, List
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.loader_exporter import load_single_delta
@@ -32,7 +33,7 @@ def log_error(message: str, report: Dict[str, List[str]]) -> None:
 # ------------------------------------------------------------
 
 
-def build_seller_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
+def build_seller_semantic(df: pl.DataFrame, run_context: RunContext) -> Dict:
     """
     Constructs the Seller-centric analytical layer from assembled events.
 
@@ -54,40 +55,72 @@ def build_seller_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     Failures:
     - Raises RuntimeError if the input contains data from multiple pipeline runs.
     """
+    # Pandas Implementation
+    # if df["run_id"].nunique() != 1:
+    #     raise RuntimeError("Multiple run_ids detected")
 
-    if df["run_id"].nunique() != 1:
+    # df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
+    # df["is_delivered"] = df["order_status"].eq("delivered")
+    # df["is_cancelled"] = df["order_status"].eq("cancelled")
+
+    # seller_weekly_fact = df.groupby(
+    #     ["seller_id", "order_year_week"],
+    #     as_index=False,
+    #     observed=True,
+    # ).agg(
+    #     week_start_date=("week_start_date", "min"),
+    #     run_id=("run_id", "first"),
+    #     weekly_order_count=("order_id", "count"),
+    #     weekly_delivered_orders=("is_delivered", "sum"),
+    #     weekly_cancelled_orders=("is_cancelled", "sum"),
+    #     weekly_revenue=("order_revenue", "sum"),
+    #     weekly_avg_lead_time=("lead_time_days", "mean"),
+    #     weekly_total_lead_time=("lead_time_days", "sum"),
+    #     weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
+    #     weekly_total_delivery_delay=("delivery_delay_days", "sum"),
+    #     weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    # )
+
+    # seller_dim = df.groupby(
+    #     "seller_id",
+    #     as_index=False,
+    #     observed=True,
+    # ).agg(
+    #     first_order_date=("order_date", "min"),
+    #     first_order_year_week=("order_year_week", "min"),
+    #     run_id=("run_id", "first"),
+    # )
+
+    # Polars Implementation
+    if df["run_id"].n_unique() != 1:
         raise RuntimeError("Multiple run_ids detected")
 
-    df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
-    df["is_delivered"] = df["order_status"].eq("delivered")
-    df["is_cancelled"] = df["order_status"].eq("cancelled")
-
-    seller_weekly_fact = df.groupby(
-        ["seller_id", "order_year_week"],
-        as_index=False,
-        observed=True,
-    ).agg(
-        week_start_date=("week_start_date", "min"),
-        run_id=("run_id", "first"),
-        weekly_order_count=("order_id", "count"),
-        weekly_delivered_orders=("is_delivered", "sum"),
-        weekly_cancelled_orders=("is_cancelled", "sum"),
-        weekly_revenue=("order_revenue", "sum"),
-        weekly_avg_lead_time=("lead_time_days", "mean"),
-        weekly_total_lead_time=("lead_time_days", "sum"),
-        weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
-        weekly_total_delivery_delay=("delivery_delay_days", "sum"),
-        weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    seller_weekly_fact = (
+        df.with_columns(
+            week_start_date=pl.col("order_date").dt.truncate("1w"),
+            is_delivered=pl.col("order_status").eq("delivered"),
+            is_cancelled=pl.col("order_status").eq("cancelled"),
+        )
+        .group_by(["seller_id", "order_year_week"])
+        .agg(
+            run_id=pl.col("run_id").first(),
+            week_start_date=pl.col("week_start_date").min(),
+            weekly_order_count=pl.col("order_id").count(),
+            weekly_delivered_orders=pl.col("is_delivered").sum(),
+            weekly_cancelled_orders=pl.col("is_cancelled").sum(),
+            weekly_revenue=pl.col("order_revenue").sum(),
+            weekly_avg_lead_time=pl.col("lead_time_days").mean(),
+            weekly_total_lead_time=pl.col("lead_time_days").sum(),
+            weekly_avg_delivery_delay=pl.col("delivery_delay_days").mean(),
+            weekly_total_delivery_delay=pl.col("delivery_delay_days").sum(),
+            weekly_avg_approval_lag=pl.col("approval_lag_days").mean(),
+        )
     )
 
-    seller_dim = df.groupby(
-        "seller_id",
-        as_index=False,
-        observed=True,
-    ).agg(
-        first_order_date=("order_date", "min"),
-        first_order_year_week=("order_year_week", "min"),
-        run_id=("run_id", "first"),
+    seller_dim = df.group_by("seller_id").agg(
+        run_id=pl.col("run_id").first(),
+        first_order_date=pl.col("order_date").min(),
+        first_order_year_week=pl.col("order_year_week").min(),
     )
 
     seller_semantic = {
@@ -103,7 +136,7 @@ def build_seller_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
 # ------------------------------------------------------------
 
 
-def build_customer_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
+def build_customer_semantic(df: pl.DataFrame, run_context: RunContext) -> Dict:
     """
     Constructs the Customer-centric analytical layer from assembled events.
 
@@ -125,34 +158,66 @@ def build_customer_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     - Raises RuntimeError if 'run_id' cardinality is greater than 1.
     """
 
-    if df["run_id"].nunique() != 1:
+    # if df["run_id"].nunique() != 1:
+    #     raise RuntimeError("Multiple run_ids detected")
+
+    # df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
+    # df["is_delivered"] = df["order_status"].eq("delivered")
+    # df["is_cancelled"] = df["order_status"].eq("cancelled")
+
+    # customer_weekly_fact = df.groupby(
+    #     ["customer_id", "order_year_week"],
+    #     as_index=False,
+    #     observed=True,
+    # ).agg(
+    #     week_start_date=("week_start_date", "min"),
+    #     run_id=("run_id", "first"),
+    #     weekly_order_count=("order_id", "count"),
+    #     weekly_delivered_orders=("is_delivered", "sum"),
+    #     weekly_cancelled_orders=("is_cancelled", "sum"),
+    #     weekly_revenue=("order_revenue", "sum"),
+    #     weekly_avg_lead_time=("lead_time_days", "mean"),
+    #     weekly_total_lead_time=("lead_time_days", "sum"),
+    #     weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
+    #     weekly_total_delivery_delay=("delivery_delay_days", "sum"),
+    #     weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    # )
+
+    # customer_dim, _ = load_single_delta(
+    #     engine="Polars", base_path=run_context.assembled_path, table_name="df_customers"
+    # )
+
+    # customer_dim["run_id"] = df["run_id"].iloc[0]
+
+    if df["run_id"].n_unique() != 1:
         raise RuntimeError("Multiple run_ids detected")
 
-    df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
-    df["is_delivered"] = df["order_status"].eq("delivered")
-    df["is_cancelled"] = df["order_status"].eq("cancelled")
-
-    customer_weekly_fact = df.groupby(
-        ["customer_id", "order_year_week"],
-        as_index=False,
-        observed=True,
-    ).agg(
-        week_start_date=("week_start_date", "min"),
-        run_id=("run_id", "first"),
-        weekly_order_count=("order_id", "count"),
-        weekly_delivered_orders=("is_delivered", "sum"),
-        weekly_cancelled_orders=("is_cancelled", "sum"),
-        weekly_revenue=("order_revenue", "sum"),
-        weekly_avg_lead_time=("lead_time_days", "mean"),
-        weekly_total_lead_time=("lead_time_days", "sum"),
-        weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
-        weekly_total_delivery_delay=("delivery_delay_days", "sum"),
-        weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    customer_weekly_fact = (
+        df.with_columns(
+            week_start_date=pl.col("order_date").dt.truncate("1w"),
+            is_delivered=pl.col("order_status").eq("delivered"),
+            is_cancelled=pl.col("order_status").eq("cancelled"),
+        )
+        .group_by(["customer_id", "order_year_week"])
+        .agg(
+            run_id=pl.col("run_id").first(),
+            week_start_date=pl.col("week_start_date").min(),
+            weekly_order_count=pl.col("order_id").count(),
+            weekly_delivered_orders=pl.col("is_delivered").sum(),
+            weekly_cancelled_orders=pl.col("is_cancelled").sum(),
+            weekly_revenue=pl.col("order_revenue").sum(),
+            weekly_avg_lead_time=pl.col("lead_time_days").mean(),
+            weekly_total_lead_time=pl.col("lead_time_days").sum(),
+            weekly_avg_delivery_delay=pl.col("delivery_delay_days").mean(),
+            weekly_total_delivery_delay=pl.col("delivery_delay_days").sum(),
+            weekly_avg_approval_lag=pl.col("approval_lag_days").mean(),
+        )
     )
 
-    customer_dim, _ = load_single_delta(run_context.assembled_path, "df_customers")
-
-    customer_dim["run_id"] = df["run_id"].iloc[0]
+    customer_dim, _ = load_single_delta(
+        engine="Polars", base_path=run_context.assembled_path, table_name="df_customers"
+    )
+    customer_dim = customer_dim.with_columns(run_id=pl.lit("run_id").first())
 
     customer_semantic = {
         "customer_weekly_fact": customer_weekly_fact,
@@ -167,7 +232,7 @@ def build_customer_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
 # ------------------------------------------------------------
 
 
-def build_product_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
+def build_product_semantic(df: pl.DataFrame, run_context: RunContext) -> Dict:
     """
     Constructs the Product-centric analytical layer from assembled events.
 
@@ -188,35 +253,68 @@ def build_product_semantic(df: pd.DataFrame, run_context: RunContext) -> Dict:
     Failures:
     - Raises RuntimeError if cross-run data contamination is detected.
     """
+    # Pandas Implementation
+    # if df["run_id"].nunique() != 1:
+    #     raise RuntimeError("Multiple run_ids detected")
 
-    if df["run_id"].nunique() != 1:
+    # df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
+    # df["is_delivered"] = df["order_status"].eq("delivered")
+    # df["is_cancelled"] = df["order_status"].eq("cancelled")
+
+    # product_weekly_fact = df.groupby(
+    #     ["product_id", "order_year_week"],
+    #     as_index=False,
+    #     observed=True,
+    # ).agg(
+    #     week_start_date=("week_start_date", "min"),
+    #     run_id=("run_id", "first"),
+    #     weekly_order_count=("order_id", "count"),
+    #     weekly_delivered_orders=("is_delivered", "sum"),
+    #     weekly_cancelled_orders=("is_cancelled", "sum"),
+    #     weekly_revenue=("order_revenue", "sum"),
+    #     weekly_avg_lead_time=("lead_time_days", "mean"),
+    #     weekly_total_lead_time=("lead_time_days", "sum"),
+    #     weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
+    #     weekly_total_delivery_delay=("delivery_delay_days", "sum"),
+    #     weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    # )
+
+    # product_dim, _ = load_single_delta(
+    #     engine="Polars", base_path=run_context.assembled_path, table_name="df_products"
+    # )
+
+    # product_dim["run_id"] = df["run_id"].iloc[0]
+
+    # Polars Implementation
+    if df["run_id"].n_unique() != 1:
         raise RuntimeError("Multiple run_ids detected")
 
-    df["week_start_date"] = df["order_date"].dt.to_period("W-MON").dt.start_time
-    df["is_delivered"] = df["order_status"].eq("delivered")
-    df["is_cancelled"] = df["order_status"].eq("cancelled")
-
-    product_weekly_fact = df.groupby(
-        ["product_id", "order_year_week"],
-        as_index=False,
-        observed=True,
-    ).agg(
-        week_start_date=("week_start_date", "min"),
-        run_id=("run_id", "first"),
-        weekly_order_count=("order_id", "count"),
-        weekly_delivered_orders=("is_delivered", "sum"),
-        weekly_cancelled_orders=("is_cancelled", "sum"),
-        weekly_revenue=("order_revenue", "sum"),
-        weekly_avg_lead_time=("lead_time_days", "mean"),
-        weekly_total_lead_time=("lead_time_days", "sum"),
-        weekly_avg_delivery_delay=("delivery_delay_days", "mean"),
-        weekly_total_delivery_delay=("delivery_delay_days", "sum"),
-        weekly_avg_approval_lag=("approval_lag_days", "mean"),
+    product_weekly_fact = (
+        df.with_columns(
+            week_start_date=pl.col("order_date").dt.truncate("1w"),
+            is_delivered=pl.col("order_status").eq("delivered"),
+            is_cancelled=pl.col("order_status").eq("cancelled"),
+        )
+        .group_by(["product_id", "order_year_week"])
+        .agg(
+            run_id=pl.col("run_id").first(),
+            week_start_date=pl.col("week_start_date").min(),
+            weekly_order_count=pl.col("order_id").count(),
+            weekly_delivered_orders=pl.col("is_delivered").sum(),
+            weekly_cancelled_orders=pl.col("is_cancelled").sum(),
+            weekly_revenue=pl.col("order_revenue").sum(),
+            weekly_avg_lead_time=pl.col("lead_time_days").mean(),
+            weekly_total_lead_time=pl.col("lead_time_days").sum(),
+            weekly_avg_delivery_delay=pl.col("delivery_delay_days").mean(),
+            weekly_total_delivery_delay=pl.col("delivery_delay_days").sum(),
+            weekly_avg_approval_lag=pl.col("approval_lag_days").mean(),
+        )
     )
 
-    product_dim, _ = load_single_delta(run_context.assembled_path, "df_products")
-
-    product_dim["run_id"] = df["run_id"].iloc[0]
+    product_dim, _ = load_single_delta(
+        engine="Polars", base_path=run_context.assembled_path, table_name="df_products"
+    )
+    product_dim = product_dim.with_columns(pl.lit("run_id").first())
 
     product_semantic = {
         "product_weekly_fact": product_weekly_fact,

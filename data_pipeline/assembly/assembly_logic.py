@@ -2,7 +2,8 @@
 # Assembly Events Stage logic
 # =============================================================================
 
-import pandas as pd
+# import pandas as pd
+import polars as pl
 from pathlib import Path
 from typing import Dict, Callable, Any, List
 from data_pipeline.shared.run_context import RunContext
@@ -17,6 +18,9 @@ DIMENSION_REFERENCES = {
         "required_column": [
             "customer_id",
             "customer_state",
+            "customer_city",
+            "customer_segment",
+            "account_creation_date",
         ],
     },
     "df_products": {
@@ -24,7 +28,12 @@ DIMENSION_REFERENCES = {
         "required_column": [
             "product_id",
             "product_category_name",
+            "product_length_cm",
+            "product_height_cm",
+            "product_width_cm",
+            "product_fragility_index",
             "product_weight_g",
+            "supplier_tier",
         ],
     },
 }
@@ -53,7 +62,7 @@ def log_error(message: str, report: Dict[str, list[str]]) -> None:
 # ------------------------------------------------------------
 
 
-def merge_data(tables: Dict) -> pd.DataFrame:
+def merge_data(tables: Dict) -> pl.DataFrame:
     """
     Core event assembly join and grain enforcement.
 
@@ -70,19 +79,35 @@ def merge_data(tables: Dict) -> pd.DataFrame:
     - Raises RuntimeError if a 1-to-Many cardinality explosion is detected (duplicate order_ids).
     """
 
-    df_orders = tables["df_orders"]
-    df_order_items = tables["df_order_items"]
-    df_payments = tables["df_payments"]
+    # Pandas Implementation
+    # df_orders = tables["df_orders"]
+    # df_order_items = tables["df_order_items"]
+    # df_payments = tables["df_payments"]
 
-    initial_orders = len(df_orders)
+    # initial_orders = len(df_orders)
 
-    df_merged = df_orders.merge(df_order_items, on="order_id", how="inner").merge(
-        df_payments, on="order_id", how="left"
+    # df_merged = df_orders.merge(df_order_items, on="order_id", how="inner").merge(
+    #     df_payments, on="order_id", how="left"
+    # )
+
+    # df_merged = df_merged.rename(columns={"payment_value": "order_revenue"})
+
+    # if df_merged["order_id"].duplicated().any():
+    #     raise RuntimeError(
+    #         "Cardinality violation: 1-to-Many explosion detected (multiple items/payments per order)"
+    #     )
+
+    initial_orders = len(tables["df_orders"])
+
+    # Polars Implementation
+    df_merged = (
+        tables["df_orders"]
+        .join(tables["df_order_items"], on="order_id", how="inner")
+        .join(tables["df_payments"], on="order_id", how="left")
+        .rename({"payment_value": "order_revenue"})
     )
 
-    df_merged = df_merged.rename(columns={"payment_value": "order_revenue"})
-
-    if df_merged["order_id"].duplicated().any():
+    if df_merged["order_id"].is_duplicated().any():
         raise RuntimeError(
             "Cardinality violation: 1-to-Many explosion detected (multiple items/payments per order)"
         )
@@ -90,18 +115,17 @@ def merge_data(tables: Dict) -> pd.DataFrame:
     if len(df_merged) < initial_orders:
         dropped_count = initial_orders - len(df_merged)
         print(
-            f"[WARNING] Assembly: {dropped_count} orders dropped during inner join because they lacked valid order_items."
+            f"[WARNING] Assembly: {dropped_count} orders dropped due to missing valid order_items."
         )
 
     return df_merged
 
 
-def derive_fields(df: pd.DataFrame, run_id: str) -> pd.DataFrame:
+def derive_fields(df: pl.DataFrame, run_id: str) -> pl.DataFrame:
     """
     Analytical enrichment and temporal metric derivation layer.
 
     Contract:
-    - Standardizes core lifecycle timestamps to datetime objects.
     - Calculates day-grain durations for fulfillment and approval latency.
     - Stays compliant with ISO-8601 for week/year attributes.
 
@@ -113,36 +137,48 @@ def derive_fields(df: pd.DataFrame, run_id: str) -> pd.DataFrame:
     - [Undetermined] - Assumes source timestamps have passed the 'remove_unparsable_timestamps' contract.
     """
 
-    for col in [
-        "order_purchase_timestamp",
-        "order_approved_at",
-        "order_delivered_timestamp",
-        "order_estimated_delivery_date",
-    ]:
-        df[col] = pd.to_datetime(df[col])
+    # Pandas Implementation
+    # df["lead_time_days"] = (
+    #     df["order_delivered_timestamp"] - df["order_approved_at"]
+    # ).dt.days
 
-    df["lead_time_days"] = (
-        df["order_delivered_timestamp"] - df["order_approved_at"]
-    ).dt.days
+    # df["approval_lag_days"] = (
+    #     df["order_approved_at"] - df["order_purchase_timestamp"]
+    # ).dt.days
 
-    df["approval_lag_days"] = (
-        df["order_approved_at"] - df["order_purchase_timestamp"]
-    ).dt.days
+    # df["delivery_delay_days"] = (
+    #     df["order_delivered_timestamp"] - df["order_estimated_delivery_date"]
+    # ).dt.days
 
-    df["delivery_delay_days"] = (
-        df["order_delivered_timestamp"] - df["order_estimated_delivery_date"]
-    ).dt.days
+    # df["order_date"] = df["order_purchase_timestamp"].dt.date
+    # df["order_year"] = df["order_purchase_timestamp"].dt.year
+    # df["order_week_iso"] = df["order_purchase_timestamp"].dt.strftime("W%V")
+    # df["order_year_week"] = df["order_purchase_timestamp"].dt.strftime("%G-W%V")
+    # df["run_id"] = run_id
 
-    df["order_date"] = df["order_purchase_timestamp"].dt.date
-    df["order_year"] = df["order_purchase_timestamp"].dt.year
-    df["order_week_iso"] = df["order_purchase_timestamp"].dt.strftime("W%V")
-    df["order_year_week"] = df["order_purchase_timestamp"].dt.strftime("%G-W%V")
-    df["run_id"] = run_id
+    # Polars implementation
+    df = df.with_columns(
+        lead_time_days=(
+            pl.col("order_delivered_timestamp") - pl.col("order_approved_at")
+        ).dt.total_days(),
+        approval_lag_days=(
+            pl.col("order_approved_at") - pl.col("order_purchase_timestamp")
+        ).dt.total_days(),
+        delivery_delay_days=(
+            pl.col("order_delivered_timestamp")
+            - pl.col("order_estimated_delivery_date")
+        ).dt.total_days(),
+        order_date=pl.col("order_purchase_timestamp").dt.date(),
+        order_year=pl.col("order_purchase_timestamp").dt.year(),
+        order_week_iso=pl.col("order_purchase_timestamp").dt.strftime("W%V"),
+        order_year_week=pl.col("order_purchase_timestamp").dt.strftime("%G-W%V"),
+        run_id=pl.lit(run_id),
+    )
 
     return df
 
 
-def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
+def freeze_schema(df: pl.DataFrame) -> pl.DataFrame:
     """
     Finalizes the structural contract via schema projection, type casting, and sorting.
 
@@ -163,9 +199,15 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
     if missing_cols:
         raise RuntimeError(f"missing required columns: {sorted(missing_cols)}")
 
-    df_contract = df[ASSEMBLE_SCHEMA]
-    df_contract = df_contract.astype(ASSEMBLE_DTYPES)
-    df_contract = df_contract.sort_values("order_id").reset_index(drop=True)
+    # Pandas Implementation
+    # df_contract = df[ASSEMBLE_SCHEMA]
+    # df_contract = df_contract.astype(ASSEMBLE_DTYPES)
+    # df_contract = df_contract.sort_values("order_id").reset_index(drop=True)
+
+    # Polars Implementation
+    df_contract = df.select(ASSEMBLE_SCHEMA)
+    df_contract = df_contract.cast(dtypes=pl.Schema(ASSEMBLE_DTYPES))
+    df_contract = df_contract.sort(by="order_id")
 
     return df_contract
 
@@ -176,11 +218,11 @@ def freeze_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def dimension_references(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     table_name: str,
     primary_key: list[str],
     req_column: list[str],
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Extracts a unique reference dataset from a historical source.
 
@@ -196,9 +238,16 @@ def dimension_references(
     - Raises RuntimeError if 'primary_key' duplicates persist after extraction.
     """
 
-    df_dim = df[req_column].drop_duplicates(subset=primary_key)
+    # Pandas Implementation
+    # df_dim = df[req_column].drop_duplicates(subset=primary_key)
 
-    if df_dim[primary_key].duplicated().any():
+    # if df_dim[primary_key].duplicated().any():
+    #     raise RuntimeError(f"Duplicated {primary_key} detected in {table_name}")
+
+    # Polars Implementations
+    df_dim = df.select(req_column).unique(subset=primary_key)
+
+    if df_dim[primary_key].is_duplicated().any():
         raise RuntimeError(f"Duplicated {primary_key} detected in {table_name}")
 
     return df_dim
