@@ -3,12 +3,10 @@
 # =============================================================================
 
 import gc
-
-# import pandas as pd
 import polars as pl
 from typing import Dict, Any
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.loader_exporter import load_single_delta, export_file
+from data_pipeline.shared.loader_exporter import load_historical_table, export_file
 from data_pipeline.semantic.semantic_logic import init_report, log_error, log_info
 from data_pipeline.semantic.registry import SEMANTIC_MODULES
 
@@ -65,7 +63,7 @@ def task_wrapper(
         return False, None
 
 
-def validate_and_freeze_table(df: pl.DataFrame, table: dict) -> pl.DataFrame:
+def validate_and_freeze_table(lf: pl.LazyFrame, table: dict) -> pl.LazyFrame:
     """
     Enforces the technical contract for a specific semantic table.
 
@@ -79,29 +77,28 @@ def validate_and_freeze_table(df: pl.DataFrame, table: dict) -> pl.DataFrame:
     - Fast-Fail: Raises RuntimeError on grain or schema violations.
     """
 
-    # Pandas Implementation
-    # if df.is_duplicated(table["grain"]).any():
-    # df_clean = df[table["schema"]].astype(table["dtypes"])
-    # df_clean = df_clean.sort_values(table["grain"]).reset_index(drop=True)
-
-    # Validate duplicates
-
-    # Polars Implementation
-    if df.select(table["grain"]).is_duplicated().any():
+    is_duplicates = (
+        lf.select(pl.struct(table["grain"]).is_duplicated().any())
+        .collect(engine="streaming")
+        .item()
+    )
+    if is_duplicates:
         raise RuntimeError(f"Duplicates found in grain: {table['grain']}")
 
+    current_columns = lf.collect_schema().names()
+
     # Validate required columns
-    missing = set(table["schema"]) - set(df.columns)
+    missing = set(table["schema"]) - set(current_columns)
     if missing:
         raise RuntimeError(f"Missing required columns: {missing}")
 
     # Enforce dtypes & subset columns
-    df_clean = df.select(table["schema"]).cast(table["dtypes"])
+    lf_clean = lf.select(table["schema"]).cast(table["dtypes"])
 
     # Deterministic sort
-    df_clean = df_clean.sort(table["grain"])
+    lf_clean = lf_clean.sort(table["grain"])
 
-    return df_clean
+    return lf_clean
 
 
 # ------------------------------------------------------------
@@ -111,7 +108,7 @@ def validate_and_freeze_table(df: pl.DataFrame, table: dict) -> pl.DataFrame:
 
 def orchestrate_module(
     run_context: RunContext,
-    df_assembled: pl.DataFrame,
+    df_assembled: pl.LazyFrame,
     module_name: str,
     module_config: dict,
     report: dict,
@@ -166,11 +163,11 @@ def orchestrate_module(
         table = module_config["tables"][table_name]
 
         # Apply Freeze Contract
-        ok, df_frozen = task_wrapper(
+        ok, lf_frozen = task_wrapper(
             step_name="validate_and_freeze",
             report=table_report,
             func=validate_and_freeze_table,
-            df=df_table,
+            lf=df_table,
             table=table,
         )
         if not ok:
@@ -180,13 +177,15 @@ def orchestrate_module(
         filename = f"{table_name}_{year}_{month}_{day}.parquet"
         output_path = semantic_module_path / filename
 
-        if not export_file(df_frozen, output_path):
+        # df_final = lf_frozen.collect(engine="streaming")
+
+        if not export_file(lf_frozen, output_path):
             log_error("Export failed", table_report)
             return False
 
-        log_info(f"Export success: {filename} ({len(df_frozen)} rows)", table_report)
+        log_info(f"Export success: {filename} (streaming)", module_report)
 
-        del df_table, df_frozen
+        del df_table
         gc.collect()
 
     return True
@@ -218,14 +217,15 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
 
     load_report = report["steps"]["load_tables"]
 
-    df_assembled, _ = load_single_delta(
-        engine="Polars",
+    df_assembled = load_historical_table(
         base_path=run_context.assembled_path,
         table_name="assembled_events",
         log_info=lambda msg: log_info(msg, load_report),
     )
 
-    if df_assembled is None or df_assembled.is_empty():
+    source_file = list(run_context.assembled_path.glob("*.parquet"))
+
+    if source_file is None:
         log_error("assembled_events logical table missing or empty", load_report)
         report["status"] = "failed"
         return report

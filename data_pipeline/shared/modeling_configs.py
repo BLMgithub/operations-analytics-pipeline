@@ -3,7 +3,8 @@
 # =============================================================================
 
 import polars as pl
-from typing import Mapping, Any
+from typing import Mapping
+from data_pipeline.shared.table_configs import TABLE_CONFIG
 
 # ------------------------------------------------------------
 # ASSEMBLE EVENTS CONFIGS
@@ -29,27 +30,6 @@ ASSEMBLE_SCHEMA = [
     "run_id",
 ]
 
-# Pandas Implementation
-# ASSEMBLE_DTYPES= {
-#     "order_id": "string",
-#     "order_revenue": "float32",
-#     "seller_id": "string",
-#     "customer_id": "string",
-#     "product_id": "string",
-#     "order_status": "category",
-#     "order_purchase_timestamp": "datetime64[ns]",
-#     "order_approved_at": "datetime64[ns]",
-#     "order_delivered_timestamp": "datetime64[ns]",
-#     "lead_time_days": "int16",
-#     "approval_lag_days": "int16",
-#     "delivery_delay_days": "int16",
-#     "order_date": "datetime64[ns]",
-#     "order_year": "int16",
-#     "order_year_week": "string",
-#     "run_id": "string",
-# }
-
-# Polars Implementation
 ASSEMBLE_DTYPES: Mapping[str, pl.DataType] = {
     "order_id": pl.String(),
     "order_revenue": pl.Float32(),
@@ -69,6 +49,19 @@ ASSEMBLE_DTYPES: Mapping[str, pl.DataType] = {
     "run_id": pl.String(),
 }
 
+#
+#
+#
+
+dimension_table = ["df_customers", "df_products"]
+DIMENSION_REFERENCES = {
+    table: {
+        "primary_key": TABLE_CONFIG[table]["primary_key"],
+        "required_column": TABLE_CONFIG[table]["required_column"],
+    }
+    for table in dimension_table
+}
+
 
 # ------------------------------------------------------------
 # SELLER SEMANTIC CONFIGS
@@ -82,16 +75,6 @@ SELLER_DIM_SCHEMA = [
     "run_id",
 ]
 
-# Pandas Implementation
-# SELLER_DIM_DTYPES = {
-#     "seller_id": "string",
-#     "first_order_date": "datetime64[ns]",
-#     "first_order_year_week": "string",
-#     "run_id": "string",
-# }
-
-
-# Polars Implementation
 SELLER_DIM_DTYPES: Mapping[str, pl.DataType] = {
     "seller_id": pl.String(),
     "first_order_date": pl.Datetime(),
@@ -117,24 +100,6 @@ SELLER_FACT_SCHEMA = [
     "weekly_avg_approval_lag",
 ]
 
-# Python Implementation
-# SELLER_FACT_DTYPES = {
-#     "seller_id": "string",
-#     "order_year_week": "string",
-#     "week_start_date": "datetime64[ns]",
-#     "run_id": "string",
-#     "weekly_order_count": "int16",
-#     "weekly_delivered_orders": "int16",
-#     "weekly_cancelled_orders": "int16",
-#     "weekly_revenue": "float32",
-#     "weekly_avg_lead_time": "float32",
-#     "weekly_total_lead_time": "int32",
-#     "weekly_avg_delivery_delay": "float32",
-#     "weekly_total_delivery_delay": "int32",
-#     "weekly_avg_approval_lag": "float32",
-# }
-
-# Polars Implementation
 SELLER_FACT_DTYPES: Mapping[str, pl.DataType] = {
     "seller_id": pl.String(),
     "order_year_week": pl.String(),
@@ -165,16 +130,6 @@ CUSTOMER_DIM_SCHEMA = [
     "account_creation_date",
 ]
 
-# Pandas Implementation
-# CUSTOMER_DIM_DTYPES = {
-#     "customer_id": "string",
-#     "customer_state": "category",
-#     "customer_city": "category",
-#     "customer_segment": "category",
-#     "account_creation_date": "datetime64[ns]",
-# }
-
-# Polars Implementation
 CUSTOMER_DIM_DTYPES: Mapping[str, pl.DataType] = {
     "customer_id": pl.String(),
     "customer_state": pl.Categorical(),
@@ -200,24 +155,6 @@ CUSTOMER_FACT_SCHEMA = [
     "weekly_avg_approval_lag",
 ]
 
-# Pandas Implementation
-# CUSTOMER_FACT_DTYPES = {
-#     "customer_id": "string",
-#     "order_year_week": "string",
-#     "week_start_date": "datetime64[ns]",
-#     "run_id": "string",
-#     "weekly_order_count": "int16",
-#     "weekly_delivered_orders": "int16",
-#     "weekly_cancelled_orders": "int16",
-#     "weekly_revenue": "float32",
-#     "weekly_avg_lead_time": "float32",
-#     "weekly_total_lead_time": "int32",
-#     "weekly_avg_delivery_delay": "float32",
-#     "weekly_total_delivery_delay": "int32",
-#     "weekly_avg_approval_lag": "float32",
-# }
-
-# Polars Implementation
 CUSTOMER_FACT_DTYPES: Mapping[str, pl.DataType] = {
     "customer_id": pl.String(),
     "order_year_week": pl.String(),
@@ -250,17 +187,6 @@ PRODUCT_DIM_SCHEMA = [
     "product_weight_g",
     "supplier_tier",
 ]
-
-# PRODUCT_DIM_DTYPES = {
-#     "product_id": "string",
-#     "product_category_name": "category",
-#     "product_length_cm": "float32",
-#     "product_height_cm": "float32",
-#     "product_width_cm": "float32",
-#     "product_fragility_index": "category",
-#     "product_weight_g": "float32",
-#     "supplier_tier": "category",
-# }
 
 PRODUCT_DIM_DTYPES: Mapping[str, pl.DataType] = {
     "product_id": pl.String(),
