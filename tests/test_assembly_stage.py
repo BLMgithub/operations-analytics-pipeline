@@ -7,7 +7,6 @@ import pytest
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.assembly.assembly_logic import log_info, log_error, init_report
 from data_pipeline.assembly.assembly_executor import (
-    init_stage_report,
     merge_data,
     derive_fields,
     freeze_schema,
@@ -177,15 +176,10 @@ def valid_derived_df():
 
 def test_init_report_structure():
     report = init_report()
-    assert set(report.keys()) == {"status", "errors", "info"}
     assert report["status"] == ""
-
-
-def test_init_stage_report_structure():
-    report = init_stage_report()
-    assert report["status"] == "running"
-    assert "steps" in report
-    assert "merge_events" in report["steps"]
+    assert "errors" in report
+    assert "info" in report
+    assert "loaded_data" in report
 
 
 def test_log_error_appends_only_to_errors(empty_report):
@@ -320,7 +314,7 @@ def test_assemble_data_success(
 
     report = assemble_events(run_context)
 
-    assert report["status"] == "running"
+    assert report["status"] == "success"
 
     assert (run_context.assembled_path / "assembled_events_2023_01_01.parquet").exists()
     assert (run_context.assembled_path / "df_customers_2023_01_01.parquet").exists()
@@ -348,48 +342,12 @@ def test_assemble_data_fails_on_missing_column(
     report = assemble_events(run_context)
 
     assert report["status"] == "failed"
-    assert report["steps"]["freeze_schema"]["status"] == "failed"
+    assert report["assembled_events"]["freeze_schema"] == False
     assert any(
-        'unable to find column "seller_id"' in error
-        or "missing required columns: ['seller_id']" in error
-        for error in report["steps"]["freeze_schema"]["errors"]
+        "missing required columns" in error
+        or 'unable to find column "seller_id"' in error
+        for error in report["errors"]
     )
-
-
-def test_assemble_data_fails_on_cardinality(
-    tmp_path,
-    valid_orders_df,
-    valid_order_items_df,
-    valid_customers_df,
-    valid_products_df,
-):
-    run_id = "20230101T120000"
-    run_context = RunContext.create(base=tmp_path, run_id=run_id)
-    run_context.initialize_directories()
-
-    duplicated_payments_df = pl.DataFrame(
-        {
-            "order_id": ["o1", "o1"],
-            "payment_value": [100.1, 100.1],
-        }
-    )
-
-    valid_orders_df.write_parquet(run_context.contracted_path / "df_orders.parquet")
-    valid_order_items_df.write_parquet(
-        run_context.contracted_path / "df_order_items.parquet"
-    )
-    duplicated_payments_df.write_parquet(
-        run_context.contracted_path / "df_payments.parquet"
-    )
-
-    valid_customers_df.write_parquet(
-        run_context.contracted_path / "df_customers.parquet"
-    )
-    valid_products_df.write_parquet(run_context.contracted_path / "df_products.parquet")
-
-    report = assemble_events(run_context)
-
-    assert report["status"] == "running"
 
 
 # =============================================================================

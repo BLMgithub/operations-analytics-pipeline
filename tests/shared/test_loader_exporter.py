@@ -84,7 +84,10 @@ def test_load_historical_table_success(tmp_path):
     df_collected = lf_total.collect()
     assert df_collected.height == 2
     assert set(df_collected["id"].to_list()) == {1, 2}
-    assert any("Scanned: table (2 files queued for lazy evaluation)" in msg for msg in log_messages)
+    assert any(
+        "Scanned: table (2 files queued for lazy evaluation)" in msg
+        for msg in log_messages
+    )
 
 
 def test_load_historical_table_no_files(tmp_path):
@@ -132,7 +135,10 @@ def test_export_file_lazy_success(tmp_path, sample_pl_df):
 
     assert success is True
     assert output_path.exists()
-    assert any("Exported file: lazy_data.parquet (streaming rows)" in msg for msg in log_messages)
+    assert any(
+        "Exported file: lazy_data.parquet (streaming rows)" in msg
+        for msg in log_messages
+    )
 
     # Verify content
     read_df = pl.read_parquet(output_path)
@@ -146,7 +152,9 @@ def test_export_file_unsupported_type(tmp_path, sample_pl_df):
     def error_logger(msg):
         error_messages.append(msg)
 
-    success = export_file("not a dataframe", tmp_path / "fail.parquet", log_error=error_logger)
+    success = export_file(
+        "not a dataframe", tmp_path / "fail.parquet", log_error=error_logger
+    )
 
     assert success is False
     assert any("Unsupported DataFrame type" in msg for msg in error_messages)

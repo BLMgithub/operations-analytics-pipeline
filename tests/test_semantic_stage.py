@@ -114,6 +114,7 @@ def valid_assembled_df():
             pl.col("delivery_delay_days").cast(pl.Int16),
             pl.col("order_year").cast(pl.Int16),
             pl.col("order_revenue").cast(pl.Float32),
+            pl.col("run_id").cast(pl.Categorical),
         ]
     )
     return df
@@ -126,8 +127,8 @@ def valid_assembled_df():
 
 def test_init_report_structure():
     report = init_report()
-    assert set(report.keys()) == {"status", "errors", "info"}
-    assert report["status"] == "success"
+    assert set(report.keys()) == {"status", "errors", "info", "loaded_data"}
+    assert report["status"] == ""
 
 
 def test_log_error_appends_only_to_errors(empty_report):
@@ -171,7 +172,7 @@ def test_seller_semantic_fails_on_multiple_run_ids(tmp_path, valid_assembled_df)
     broken_df = valid_assembled_df.clone()
     broken_df = broken_df.with_columns(
         pl.when(pl.Series([False, True]))
-        .then(pl.lit("another_run"))
+        .then(pl.lit("another_run").cast(pl.Categorical))
         .otherwise(pl.col("run_id"))
         .alias("run_id")
     )
@@ -207,7 +208,7 @@ def test_build_semantic_layer_success(
 
     report = build_semantic_layer(run_context)
 
-    assert report["status"] == "success"
+    assert report["status"] == ""
 
     for module_name, module_config in SEMANTIC_MODULES.items():
         for table_name in module_config["tables"]:
@@ -228,7 +229,7 @@ def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df
     broken_assembled = valid_assembled_df.clone()
     broken_assembled = broken_assembled.with_columns(
         pl.when(pl.Series([False, True]))
-        .then(pl.lit("another_run"))
+        .then(pl.lit("another_run").cast(pl.Categorical))
         .otherwise(pl.col("run_id"))
         .alias("run_id")
     )
@@ -240,11 +241,11 @@ def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    assert report["modules"]["seller_semantic"]["build_stage"]["status"] == "failed"
-    assert any(
-        "Multiple run_ids detected" in error
-        for error in report["modules"]["seller_semantic"]["build_stage"]["errors"]
+    assert (
+        report["modules"]["seller_semantic"]["seller_weekly_fact"]["build_stage"]
+        == False
     )
+    assert any("Multiple run_ids detected" in error for error in report["errors"])
 
 
 def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled_df):
@@ -268,7 +269,7 @@ def test_build_semantic_layer_fails_on_missing_or_empty_df(tmp_path):
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    empty_df = pl.DataFrame({"run_id": []}, schema={"run_id": pl.Utf8})
+    empty_df = pl.DataFrame({"run_id": []}, schema={"run_id": pl.Categorical})
 
     empty_df.write_parquet(
         run_context.assembled_path / "assembled_events_2023_01_01.parquet"

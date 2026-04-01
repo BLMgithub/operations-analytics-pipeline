@@ -153,7 +153,9 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     # Only setup one module but incomplete
     module_path = run_context.semantic_path / "seller_semantic"
     module_path.mkdir(parents=True, exist_ok=True)
-    valid_seller_fact.write_parquet(module_path / "seller_weekly_fact_2023_01_01.parquet")
+    valid_seller_fact.write_parquet(
+        module_path / "seller_weekly_fact_2023_01_01.parquet"
+    )
 
     report = run_integrity_gate(run_context)
     assert report["status"] == "failed"
