@@ -17,7 +17,12 @@ EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
 
 
 def init_report():
-    return {"status": "", "errors": [], "info": []}
+    return {
+        "status": "",
+        "errors": [],
+        "info": [],
+        "loaded_data": [],
+    }
 
 
 def log_info(message: str, report: Dict[str, List[str]]) -> None:
@@ -28,6 +33,11 @@ def log_info(message: str, report: Dict[str, List[str]]) -> None:
 def log_error(message: str, report: Dict[str, list[str]]) -> None:
     print(f"[ERROR] {message}")
     report["errors"].append(message)
+
+
+def loaded_data(message: str, report: Dict[str, list[str]]) -> None:
+    print(f"[INFO] {message}")
+    report["loaded_data"].append(message)
 
 
 # ------------------------------------------------------------
@@ -45,13 +55,16 @@ def merge_data(tables: Dict) -> pl.LazyFrame:
 
     Optimization Logic:
     - Hash-Join: Maps high-cardinality UUIDs to UInt64 hashes to reduce Join Hash Table memory.
-    - Pre-aggregation: Sums payments and deduplicates items BEFORE joining to guarantee 
+    - Pre-aggregation: Sums payments and deduplicates items BEFORE joining to guarantee
       a strict 1:1 grain and prevent Cartesian row explosions.
     - Early Projection: Selects required columns at the source to minimize join width.
 
     Invariants:
     - Dataset Grain: Strictly one row per 'order_id'.
     - Referential Integrity: Orders lacking corresponding item records are discarded.
+
+    Failures:
+    - Potential for cardinality explosion if pre-aggregation logic is bypassed.
     """
 
     pl.enable_string_cache()
@@ -122,6 +135,10 @@ def derive_fields(lf: pl.LazyFrame, run_id: str) -> pl.LazyFrame:
     Invariants:
     - Lineage: Every row is stamped with the current 'run_id' for traceability.
     - Temporal Grain: Metrics (lead_time, lags, delays) are represented as integer days.
+
+    Failures:
+    - Raises ComputeError (from Polars) if date subtraction logic encounters nulls
+      in non-nullable date columns.
     """
 
     lf_derived = lf.with_columns(
@@ -162,7 +179,7 @@ def freeze_schema(lf: pl.LazyFrame) -> pl.LazyFrame:
     - Type Enforcement: Casts remaining columns to the formats defined in 'ASSEMBLE_DTYPES'.
 
     Optimization Logic:
-    - Zero-Copy Streaming: Omits sorting to maintain the non-blocking execution plan 
+    - Zero-Copy Streaming: Omits sorting to maintain the non-blocking execution plan
       required for efficient sink_parquet() operations in memory-constrained environments.
 
     Invariants:
@@ -221,13 +238,14 @@ def dimension_references(
 
 
 # ------------------------------------------------------------
-# TASK WRAPPERS
+# TASK WRAPPER
 # ------------------------------------------------------------
 
 
 def task_wrapper(
+    report: dict,
     step_name: str,
-    report: Dict,
+    status_tracker: dict,
     func: Callable,
     *args,
     **kwargs,
@@ -235,42 +253,49 @@ def task_wrapper(
     """
     Unified task runner that handles logging, reporting, and execution.
 
-    Contract:
-    - Encapsulates execution of a logic function with standardized telemetry.
-    - Manages the state transition of the 'report' object for the specific 'step_name'.
+    Workflow:
+    1. Dispatch: Executes the logic function 'func' with provided arguments.
+    2. Monitor: Traps any exceptions raised during execution.
+    3. Report: Updates 'status_tracker' and logs success/failure to the report.
 
-    Inputs:
-    - step_name: The lookup key in the report['steps'] dictionary.
-    - report: The shared state dictionary initialized by 'init_stage_report'.
-    - func: The logic/transformation function to be executed.
-    - *args: Positional arguments passed directly to 'func'.
+    Operational Guarantees:
+    - Fail-Safe: Traps all exceptions to prevent pipeline termination, converting
+      errors into 'failed' status reports.
+    - Integrity: Updates the 'status' field in the report for the given step to
+      either True (success) or False (failed) regardless of outcome.
 
-    Outputs:
-    - Returns a tuple of (Success Boolean, Result Data).
-    - Result Data is 'None' if the task fails or returns no data.
+    Side Effects:
+    - Mutates 'report' and 'status_tracker' dictionaries in-place.
+    - Prints informational/error logs to stdout.
 
-    Invariants:
-    - Fail-Safe: Traps all exceptions to prevent pipeline termination, converting errors into 'failed' status reports.
-    - Integrity: Updates the 'status' field in the report for the given step to either 'success' or 'failed' regardless of outcome.
+    Failure Behavior:
+    - Catches all Exceptions, logs the traceback via 'log_error', and returns
+      (False, None) to signal a controlled sub-task failure.
+
+    Returns:
+        tuple[bool, Any]: (Success Boolean, Result Data or None).
     """
-    step_report = report["steps"][step_name]
 
     try:
         result = func(*args, **kwargs)
 
         if result is None:
-            step_report["status"] = "failed"
+            status_tracker[step_name] = False
             return False, None
 
-        step_report["status"] = "success"
-        log_info(f"Step {step_name} completed successfully.", step_report)
+        status_tracker[step_name] = True
+        print(f"[INFO] Step {step_name} completed successfully.")
         return True, result
 
     except Exception as e:
-        log_error(f"Step {step_name} failed: {str(e)}", step_report)
-        step_report["status"] = "failed"
-
+        log_error(f"Step {step_name} failed: {(e)}", report)
+        status_tracker[step_name] = False
         return False, None
+
+
+# ------------------------------------------------------------
+# IO Wrappers
+# ------------------------------------------------------------
 
 
 def load_event_table(run_context: RunContext, report: Dict) -> Any:
@@ -289,14 +314,22 @@ def load_event_table(run_context: RunContext, report: Dict) -> Any:
     tables = {}
 
     for table_name in EVENT_TABLES:
-        df = load_historical_table(
-            contracted_path,
-            table_name,
-            log_info=lambda msg: log_info(msg, report),
-        )
+        try:
+            df = load_historical_table(
+                contracted_path,
+                table_name,
+                log_info=lambda msg: loaded_data(msg, report),
+            )
 
-        if df is not None:
-            tables[table_name] = df
+            if df is not None:
+                tables[table_name] = df
+
+        except Exception as e:
+            log_error(f"Required table {table_name} not found: {e}", report)
+            return None
+
+    if len(tables) < len(EVENT_TABLES):
+        return None
 
     return tables
 

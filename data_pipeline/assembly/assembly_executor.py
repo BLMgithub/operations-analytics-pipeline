@@ -11,28 +11,15 @@ from data_pipeline.assembly.assembly_logic import (
     init_report,
     log_info,
     log_error,
+    loaded_data,
     dimension_references,
     merge_data,
     derive_fields,
     freeze_schema,
-    load_event_table,
     task_wrapper,
+    load_event_table,
     export_path,
 )
-
-
-def init_stage_report():
-    return {
-        "status": "running",
-        "steps": {
-            "load_tables": init_report(),
-            "merge_events": init_report(),
-            "derive_fields": init_report(),
-            "freeze_schema": init_report(),
-            "dim_reference": init_report(),
-            "export": init_report(),
-        },
-    }
 
 
 # ------------------------------------------------------------
@@ -57,51 +44,82 @@ def orchestrate_event_assembly(run_context: RunContext, report: Dict) -> bool:
 
     Failures:
     - Returns False immediately (fail-fast) if any sub-task wrapper fails.
+
+    Failure Behavior:
+    - Traps unexpected exceptions during the assembly pipeline via a try-except block.
+    - Logs errors to the report and ensures memory reclamation via a finally block.
     """
 
-    tables = load_event_table(run_context, report["steps"]["load_tables"])
-    if not tables:
-        return False
+    report["assembled_events"] = {
+        "merge_events": False,
+        "derive_fields": False,
+        "freeze_schema": False,
+        "export": False,
+    }
 
-    # Merging data
-    ok, lf_merged = task_wrapper(
-        step_name="merge_events", report=report, func=merge_data, tables=tables
-    )
-    if not ok:
-        return False
-    del tables
+    tracker = report["assembled_events"]
+    lf_freezed = None
 
-    # Derive fields
-    ok, lf_derived = task_wrapper(
-        step_name="derive_fields",
-        report=report,
-        func=derive_fields,
-        lf=lf_merged,
-        run_id=run_context.run_id,
-    )
-    if not ok:
-        return False
+    try:
 
-    # Freeze schema
-    ok, lf_freezed = task_wrapper(
-        step_name="freeze_schema", report=report, func=freeze_schema, lf=lf_derived
-    )
-    if not ok:
-        return False
+        tables = load_event_table(run_context, report)
 
-    # Export Assembled events
-    path = export_path(run_context, "assembled_events")
-    export_report = report["steps"]["export"]
+        if not tables:
+            return False
 
-    if not export_file(
-        df=lf_freezed,
-        output_path=path,
-        log_info=lambda msg, report=export_report: log_info(msg, report),
-        log_error=lambda msg, report=export_report: log_error(msg, report),
-    ):
-        return False
+        ok, lf_merged = task_wrapper(
+            report=report,
+            step_name="merge_events",
+            status_tracker=tracker,
+            func=merge_data,
+            tables=tables,
+        )
+        if not ok:
+            return False
 
-    gc.collect()
+        del tables
+
+        ok, lf_derived = task_wrapper(
+            report=report,
+            step_name="derive_fields",
+            status_tracker=tracker,
+            func=derive_fields,
+            lf=lf_merged,
+            run_id=run_context.run_id,
+        )
+        if not ok:
+            return False
+
+        ok, lf_freezed = task_wrapper(
+            report=report,
+            step_name="freeze_schema",
+            status_tracker=tracker,
+            func=freeze_schema,
+            lf=lf_derived,
+        )
+        if not ok:
+            return False
+
+        path = export_path(run_context, "assembled_events")
+
+        if not export_file(
+            df=lf_freezed,
+            output_path=path,
+            log_error=lambda msg: log_error(msg, report),
+        ):
+            tracker["export"] = False
+            return False
+
+        tracker["export"] = True
+        report["status"] = "success"
+        log_info("Export: assembled_events successfully", report)
+
+    except Exception as e:
+        log_error(f"Unexpected error processing event assembly: {e}", report)
+
+    finally:
+        gc.collect()
+
     return True
 
 
@@ -125,45 +143,79 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
     Side Effects:
     - Performs per-iteration memory cleanup (del/gc.collect) to prevent
       accumulation of large dimension frames.
+
+    Failure Behavior:
+    - Traps FileNotFoundError and general Exceptions during each iteration.
+    - Logs specific table-level failures and terminates the orchestration to
+      maintain consistency across dimension snapshots.
     """
 
     for table, config in DIMENSION_REFERENCES.items():
 
-        lf_raw = load_historical_table(run_context.contracted_path, table)
-        if lf_raw is None:
+        report[table] = {"dim_reference": False, "export": False}
+        tracker = report[table]
+
+        lf_raw = None
+        df_dim = None
+
+        try:
+            lf_raw = load_historical_table(
+                run_context.contracted_path,
+                table,
+                log_info=lambda msg: loaded_data(msg, report),
+            )
+
+            if lf_raw is None:
+                return False
+
+            primary_key = config.get("primary_key", [])
+            require_col = config.get("required_column", [])
+
+            ok, df_dim = task_wrapper(
+                report=report,
+                step_name="dim_reference",
+                status_tracker=tracker,
+                func=dimension_references,
+                lf=lf_raw,
+                table_name=table,
+                primary_key=primary_key,
+                req_column=require_col,
+            )
+
+            if not ok:
+                return False
+
+            path = export_path(run_context, table)
+
+            if not export_file(
+                df=df_dim,
+                output_path=path,
+                log_error=lambda msg: log_error(msg, report),
+            ):
+
+                tracker["export"] = False
+                return False
+
+            tracker["export"] = True
+            log_info(f"Export dimension reference:{table} successfully", report)
+
+        except FileNotFoundError as e:
+            log_error(f"File not found for dimension table {table}: {str(e)}", report)
+
             return False
 
-        primary_key = config.get("primary_key", [])
-        require_col = config.get("required_column", [])
-
-        ok, df_dim = task_wrapper(
-            step_name="dim_reference",
-            report=report,
-            func=dimension_references,
-            lf=lf_raw,
-            table_name=table,
-            primary_key=primary_key,
-            req_column=require_col,
-        )
-
-        if not ok:
+        except Exception as e:
+            log_error(
+                f"Unexpected error processing dimension table {table}: {str(e)}", report
+            )
             return False
 
-        # Export
-        path = export_path(run_context, table)
-        export_report = report["steps"]["export"]
-
-        if not export_file(
-            df_dim,
-            path,
-            log_info=lambda msg, report=export_report: log_info(msg, report),
-            log_error=lambda msg, report=export_report: log_error(msg, report),
-        ):
-            return False
-
-        export_report["status"] = "success"
-        del lf_raw, df_dim
-        gc.collect()
+        finally:
+            if lf_raw is not None:
+                del lf_raw
+            if df_dim is not None:
+                del df_dim
+            gc.collect()
 
     return True
 
@@ -197,11 +249,15 @@ def assemble_events(run_context: RunContext) -> dict:
     - Failure: Fail-fast; any task failure halts the stage and returns a 'failed' status.
     - Context: Relies on 'run_context' for deterministic path resolution.
 
+    Failure Behavior:
+    - Cascades orchestration failures: If either Workflow I or Workflow II returns
+      False, the stage status is set to 'failed' and the report is returned immediately.
+
     Returns:
         dict: A stage report containing 'status' and step-level execution logs.
     """
 
-    report = init_stage_report()
+    report = init_report()
 
     if not orchestrate_event_assembly(run_context, report):
         report["status"] = "failed"

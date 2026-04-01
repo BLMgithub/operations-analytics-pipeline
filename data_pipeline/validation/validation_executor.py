@@ -38,6 +38,10 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     - Comprehensive Reporting: Captures all failures across all tables before returning; does not fail-fast on the first table error.
     - Severity: Structural issues are logged as 'errors' while referential issues are 'warnings'.
 
+    Failure Behavior:
+    - Non-Blocking: Continues processing remaining tables even if one fails base validations.
+    - Status Update: Sets global report status to 'failed' if any errors or warnings are accumulated.
+
     Returns:
         Dict: A unified validation report containing 'status' and detailed finding lists.
     """

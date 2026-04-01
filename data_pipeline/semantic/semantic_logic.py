@@ -3,29 +3,9 @@
 # =============================================================================
 
 import polars as pl
-from typing import Dict, List
+from typing import Dict
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.loader_exporter import load_historical_table
-
-
-# ------------------------------------------------------------
-# SEMANTIC REPORT & LOGS
-# ------------------------------------------------------------
-
-
-def init_report():
-    return {"status": "success", "errors": [], "info": []}
-
-
-def log_info(message: str, report: Dict[str, List[str]]) -> None:
-    print(f"[INFO] {message}")
-    report["info"].append(message)
-
-
-def log_error(message: str, report: Dict[str, List[str]]) -> None:
-    print(f"[ERROR] {message}")
-    report["errors"].append(message)
-
 
 # ------------------------------------------------------------
 # SELLER SEMANTIC BUILDER
@@ -41,7 +21,7 @@ def build_seller_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Aggregates metrics including revenue, lead times, and fulfillment lag.
 
     Optimization Logic:
-    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32 
+    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32
       immediately within the agg() block to minimize the memory footprint of the result set.
     - Categorical Handling: Relies on pre-cast Categorical columns for grouping keys.
 
@@ -50,6 +30,9 @@ def build_seller_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Fact Grain: Strictly 1 row per ('seller_id', 'order_year_week').
     - Dimension Grain: Strictly 1 row per 'seller_id'.
     - Temporal: Aligns all metrics to ISO-week start dates (Monday).
+
+    Failures:
+    - Raises RuntimeError if multiple 'run_id' values are detected in the source LazyFrame.
     """
 
     if lf.select(pl.col("run_id").n_unique()).collect(engine="streaming").item() != 1:
@@ -111,7 +94,7 @@ def build_customer_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Calculates lifetime-to-date attributes and first-purchase markers.
 
     Optimization Logic:
-    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32 
+    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32
       immediately within the agg() block to minimize the memory footprint of the result set.
     - Categorical Handling: Relies on pre-cast Categorical columns for grouping keys.
 
@@ -119,6 +102,9 @@ def build_customer_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Lineage: Requires a unified 'run_id' for consistent partitioning.
     - Fact Grain: Strictly 1 row per ('customer_id', 'order_year_week').
     - Dimension Grain: Strictly 1 row per 'customer_id'.
+
+    Failures:
+    - Raises RuntimeError if multiple 'run_id' values are detected in the source LazyFrame.
     """
 
     if lf.select(pl.col("run_id").n_unique()).collect(engine="streaming").item() != 1:
@@ -155,7 +141,9 @@ def build_customer_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     customer_dim = load_historical_table(
         base_path=run_context.assembled_path, table_name="df_customers"
     )
-    customer_dim = customer_dim.with_columns(run_id=pl.lit("run_id").first())
+    customer_dim = customer_dim.with_columns(
+        run_id=pl.lit(run_context.run_id).cast(pl.Categorical)
+    )
 
     customer_semantic = {
         "customer_weekly_fact": customer_weekly_fact,
@@ -179,7 +167,7 @@ def build_product_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Merges category metadata with weekly transaction volumes.
 
     Optimization Logic:
-    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32 
+    - Narrow Aggregation: Casts counts and sums to Int16/Int32 and revenues to Float32
       immediately within the agg() block to minimize the memory footprint of the result set.
     - Categorical Handling: Relies on pre-cast Categorical columns for grouping keys.
 
@@ -187,6 +175,9 @@ def build_product_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     - Lineage: Validates input homogeneity via 'run_id' check.
     - Fact Grain: Strictly 1 row per ('product_id', 'order_year_week').
     - Dimension Grain: Strictly 1 row per 'product_id'.
+
+    Failures:
+    - Raises RuntimeError if multiple 'run_id' values are detected in the source LazyFrame.
     """
 
     if lf.select(pl.col("run_id").n_unique()).collect(engine="streaming").item() != 1:
@@ -223,7 +214,9 @@ def build_product_semantic(lf: pl.LazyFrame, run_context: RunContext) -> Dict:
     product_dim = load_historical_table(
         base_path=run_context.assembled_path, table_name="df_products"
     )
-    product_dim = product_dim.with_columns(pl.lit("run_id").first())
+    product_dim = product_dim.with_columns(
+        run_id=pl.lit(run_context.run_id).cast(pl.Categorical)
+    )
 
     product_semantic = {
         "product_weekly_fact": product_weekly_fact,

@@ -10,7 +10,7 @@ from typing import Optional, Callable, Tuple, Any
 
 FILE_LOADERS = {
     ".csv": lambda path: pd.read_csv(path),
-    ".parquet": lambda path: pd.read_parquet(path, engine="pyarrow"),
+    ".parquet": lambda path: pd.read_parquet(path),
 }
 
 
@@ -110,7 +110,7 @@ def export_file(
     - Enforces Parquet with Brotli compression as the internal standard.
 
     Optimization Logic:
-    - Streaming Sink: When provided with a pl.LazyFrame, uses sink_parquet() to 
+    - Streaming Sink: When provided with a pl.LazyFrame, uses sink_parquet() to
       stream data in chunks, bypassing full in-memory materialization.
 
     Invariants:

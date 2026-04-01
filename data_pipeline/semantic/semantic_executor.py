@@ -4,63 +4,17 @@
 
 import gc
 import polars as pl
-from typing import Dict, Any
+from typing import Dict
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.loader_exporter import load_historical_table, export_file
-from data_pipeline.semantic.semantic_logic import init_report, log_error, log_info
 from data_pipeline.semantic.registry import SEMANTIC_MODULES
-
-
-def task_wrapper(
-    step_name: str,
-    report: dict,
-    func,
-    *args,
-    **kwargs,
-) -> tuple[bool, Any]:
-    """
-    Unified task runner that handles logging, reporting, and execution.
-
-    Inputs:
-    - step_name: The lookup key in the report['steps'] dictionary.
-    - report: The shared state dictionary initialized by 'init_stage_report'.
-    - func: The logic/transformation function to be executed.
-    - *args: Positional arguments passed directly to 'func'.
-
-    Outputs:
-    - Returns a tuple of (Success Boolean, Result Data).
-    - Result Data is 'None' if the task fails or returns no data.
-
-    Invariants:
-    - Guaranteed return of (bool, Result|None).
-    - Ensures report[step_name] initialization and status updates.
-
-    Failures:
-    - Traps all exceptions; returns False/None and logs the error to telemetry.
-    - Returns False if the underlying function returns None (logical failure).
-    """
-
-    if step_name not in report:
-        report[step_name] = init_report()
-
-    step_report = report[step_name]
-
-    try:
-        result = func(*args, **kwargs)
-        if result is None:
-            step_report["status"] = "failed"
-
-            return False, None
-
-        step_report["status"] = "success"
-
-        return True, result
-
-    except Exception as e:
-        log_error(str(e), step_report)
-        step_report["status"] = "failed"
-
-        return False, None
+from data_pipeline.assembly.assembly_logic import (
+    init_report,
+    log_info,
+    log_error,
+    loaded_data,
+    task_wrapper,
+)
 
 
 def validate_and_freeze_table(lf: pl.LazyFrame, table: dict) -> pl.LazyFrame:
@@ -72,9 +26,9 @@ def validate_and_freeze_table(lf: pl.LazyFrame, table: dict) -> pl.LazyFrame:
     - Types: Explicitly casts columns to types defined in table['dtypes'].
 
     Optimization Logic:
-    - Lazy Contract Enforcement: Defers all validation and casting to the final 
+    - Lazy Contract Enforcement: Defers all validation and casting to the final
       streaming sink, avoiding intermediate materialization passes.
-    - Zero-Copy Sort Omission: Bypasses sorting to maintain compatibility with 
+    - Zero-Copy Sort Omission: Bypasses sorting to maintain compatibility with
       non-blocking streaming engines.
 
     Behavior:
@@ -83,12 +37,10 @@ def validate_and_freeze_table(lf: pl.LazyFrame, table: dict) -> pl.LazyFrame:
 
     current_columns = lf.collect_schema().names()
 
-    # Validate required columns
     missing = set(table["schema"]) - set(current_columns)
     if missing:
         raise RuntimeError(f"Missing required columns: {missing}")
 
-    # Enforce dtypes & subset columns
     lf_clean = lf.select(table["schema"]).cast(table["dtypes"])
 
     return lf_clean
@@ -117,31 +69,54 @@ def orchestrate_module(
         5. Cleanup: Manages memory via explicit deletion and garbage collection.
 
     Optimization Logic:
-    - Linear Streaming Propagation: Maintains the LazyFrame chain from builder to 
-      export, ensuring constant memory usage regardless of dataset scale.
-    - Incremental Resource Reclamation: Triggers explicit Python garbage collection 
-      after every table export to purge intermediate metadata and plan overhead.
+    - Linear Streaming Propagation: Maintains the LazyFrame chain from builder to
+    export, ensuring constant memory usage regardless of dataset scale.
+    - Incremental Resource Reclamation: Triggers explicit Python garbage collection
+    after every table export to purge intermediate metadata and plan overhead.
 
     Invariants:
     - Fail-Fast: Any error in building or table-level processing halts the module.
     - Strict Config: Builder output must match keys in 'module_config["tables"]'.
 
+    Failure Behavior:
+    - Traps builder-level and table-level exceptions via try-except blocks.
+    - Logs specific errors (e.g., FileExistsError, general Exceptions) and marks
+      the module and global report status as 'failed' before returning False.
+
     Returns:
         bool: True if the module and all its tables were successfully processed.
     """
 
-    module_report = init_report()
-    report["modules"][module_name] = module_report
+    module_report = report["modules"]
+    module_report[module_name] = {}
+    table_trackers = {}
+
+    for table_name in module_config["tables"]:
+        tracker = {"build_stage": False, "validate_and_freeze": False}
+        module_report[module_name][table_name] = tracker
+        table_trackers[table_name] = tracker
+
+    module_report[module_name]["export"] = False
 
     # Execute Module Builder
-    ok, builder_output = task_wrapper(
-        "build_stage",
-        module_report,
-        module_config["builder"],
-        df_assembled,
-        run_context,
-    )
-    if not ok:
+    try:
+        builder_output = module_config["builder"](df_assembled, run_context)
+        if builder_output is None:
+            log_error(f"Builder {module_name} returned None", report)
+            report["status"] = "failed"
+
+            return False
+
+        # If successful, mark all tables as build_stage: True
+        for tracker in table_trackers.values():
+            tracker["build_stage"] = True
+
+        print(f"[INFO] Module {module_name}: build_stage completed successfully.")
+
+    except Exception as e:
+        log_error(f"Step build_stage failed: {str(e)}", report)
+        report["status"] = "failed"
+
         return False
 
     semantic_module_path = run_context.semantic_path / module_name
@@ -152,38 +127,51 @@ def orchestrate_module(
 
     # Validate, Freeze, and Export Each Table
     for table_name, df_table in builder_output.items():
-        table_report = init_report()
-        module_report[table_name] = table_report
 
-        if table_name not in module_config["tables"]:
-            log_error(f"Unexpected table returned: {table_name}", module_report)
-            return False
+        try:
+            if table_name not in module_config["tables"]:
+                report["status"] = "failed"
+                return False
 
-        table = module_config["tables"][table_name]
+            table_config = module_config["tables"][table_name]
+            tracker = table_trackers[table_name]
 
-        # Apply Freeze Contract
-        ok, lf_frozen = task_wrapper(
-            step_name="validate_and_freeze",
-            report=table_report,
-            func=validate_and_freeze_table,
-            lf=df_table,
-            table=table,
-        )
-        if not ok:
-            return False
+            ok, lf_frozen = task_wrapper(
+                report=report,
+                step_name="validate_and_freeze",
+                status_tracker=tracker,
+                func=validate_and_freeze_table,
+                lf=df_table,
+                table=table_config,
+            )
+            if not ok:
+                report["status"] = "failed"
+                return False
 
-        # Export Artifact
-        filename = f"{table_name}_{year}_{month}_{day}.parquet"
-        output_path = semantic_module_path / filename
+            filename = f"{table_name}_{year}_{month}_{day}.parquet"
+            output_path = semantic_module_path / filename
 
-        if not export_file(lf_frozen, output_path):
-            log_error("Export failed", table_report)
-            return False
+            if not export_file(
+                lf_frozen,
+                output_path,
+                log_error=lambda msg: log_error(msg, report),
+            ):
+                report["status"] = "failed"
+                return False
 
-        log_info(f"Export success: {filename} (streaming)", module_report)
+        except FileExistsError as e:
+            log_error(f"Unexpected table returned {table_name}: {e}", report)
 
-        del df_table
-        gc.collect()
+        except Exception as e:
+            log_error(f"Unexpected error processing {table_name}: {e}", report)
+
+        finally:
+            if df_table is not None:
+                del df_table
+            gc.collect()
+
+    log_info(f"Export Module: {module_name} Successfully", report)
+    module_report[module_name]["export"] = True
 
     return True
 
@@ -202,28 +190,28 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
     - Atomicity: Module failures are trapped but mark the entire stage as 'failed'.
     - Lineage: Uses 'run_id' for deterministic output partitioning.
 
+    Failure Behavior:
+    - Fail-Fast on missing source: Returns immediately if 'assembled_events' is missing.
+    - Bubbles up module-level failures: If any module orchestration returns False,
+      the stage status is set to 'failed' and the report is returned.
+
     Returns:
         Dict: A global report of module statuses and error logs.
     """
 
-    report = {
-        "status": "success",
-        "steps": {"load_tables": init_report()},
-        "modules": {},
-    }
-
-    load_report = report["steps"]["load_tables"]
+    report = init_report()
+    report["modules"] = {}
 
     df_assembled = load_historical_table(
         base_path=run_context.assembled_path,
         table_name="assembled_events",
-        log_info=lambda msg: log_info(msg, load_report),
+        log_info=lambda msg: loaded_data(msg, report),
     )
 
     source_file = list(run_context.assembled_path.glob("*.parquet"))
 
     if not source_file:
-        log_error("assembled_events logical table missing or empty", load_report)
+        log_error("assembled_events logical table missing or empty", report)
         report["status"] = "failed"
         return report
 

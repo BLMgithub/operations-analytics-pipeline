@@ -49,9 +49,9 @@ ASSEMBLE_DTYPES: Mapping[str, pl.DataType] = {
     "run_id": pl.Categorical(),
 }
 
-#
-#
-#
+# ------------------------------------------------------------
+# DIMENSION REFERENCES
+# ------------------------------------------------------------
 
 dimension_table = ["df_customers", "df_products"]
 DIMENSION_REFERENCES = {
@@ -128,6 +128,7 @@ CUSTOMER_DIM_SCHEMA = [
     "customer_city",
     "customer_segment",
     "account_creation_date",
+    "run_id",
 ]
 
 CUSTOMER_DIM_DTYPES: Mapping[str, pl.DataType] = {
@@ -136,6 +137,7 @@ CUSTOMER_DIM_DTYPES: Mapping[str, pl.DataType] = {
     "customer_city": pl.Categorical(),
     "customer_segment": pl.Categorical(),
     "account_creation_date": pl.Datetime(),
+    "run_id": pl.Categorical(),
 }
 
 # Customer Fact and dtypes
@@ -186,6 +188,7 @@ PRODUCT_DIM_SCHEMA = [
     "product_fragility_index",
     "product_weight_g",
     "supplier_tier",
+    "run_id",
 ]
 
 PRODUCT_DIM_DTYPES: Mapping[str, pl.DataType] = {
@@ -197,6 +200,7 @@ PRODUCT_DIM_DTYPES: Mapping[str, pl.DataType] = {
     "product_fragility_index": pl.Categorical(),
     "product_weight_g": pl.Float32(),
     "supplier_tier": pl.Categorical(),
+    "run_id": pl.Categorical(),
 }
 
 
