@@ -21,7 +21,7 @@ env:
   REGION: us-east1
   REPO_NAME: operations-artifacts-dev
   IMAGE_NAME: pipeline
-  JOB_NAME: operations-pipeline
+  JOB_NAME: operations-pipeline-dev
 
 jobs:
   # Call CI-Infra
