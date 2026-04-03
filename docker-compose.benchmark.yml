@@ -1,0 +1,20 @@
+services:
+  stress-test:
+    container_name: pipeline-memory-stress-test
+    build:
+      context: .
+      dockerfile: data_pipeline/Dockerfile
+
+    # Mount the local data folder
+    volumes:
+      - ./data:/app/data
+
+    deploy:
+      resources:
+        limits:
+          # Provision Specs Test
+          memory: 4G
+          cpus: '2.0'
+          # Simulate 2 virtual cpus
+    environment:
+      - POLARS_MAX_THREADS=2

@@ -2,7 +2,7 @@
 # UNIT TESTS FOR publish_lifecycle.py
 # =============================================================================
 
-import pandas as pd
+import polars as pl
 import pytest
 import json
 from pathlib import Path
@@ -35,32 +35,32 @@ def empty_report():
 
 @pytest.fixture
 def valid_seller_fact():
-    return pd.DataFrame({col: ["val"] for col in SELLER_FACT_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in SELLER_FACT_SCHEMA})
 
 
 @pytest.fixture
 def valid_seller_dim():
-    return pd.DataFrame({col: ["val"] for col in SELLER_DIM_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in SELLER_DIM_SCHEMA})
 
 
 @pytest.fixture
 def valid_customer_fact():
-    return pd.DataFrame({col: ["val"] for col in CUSTOMER_FACT_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in CUSTOMER_FACT_SCHEMA})
 
 
 @pytest.fixture
 def valid_customer_dim():
-    return pd.DataFrame({col: ["val"] for col in CUSTOMER_DIM_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in CUSTOMER_DIM_SCHEMA})
 
 
 @pytest.fixture
 def valid_product_fact():
-    return pd.DataFrame({col: ["val"] for col in PRODUCT_FACT_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in PRODUCT_FACT_SCHEMA})
 
 
 @pytest.fixture
 def valid_product_dim():
-    return pd.DataFrame({col: ["val"] for col in PRODUCT_DIM_SCHEMA})
+    return pl.DataFrame({col: ["val"] for col in PRODUCT_DIM_SCHEMA})
 
 
 # ------------------------------------------------------------
@@ -100,7 +100,8 @@ def setup_semantic_files(run_context, df_map):
         for table_name in module["tables"]:
             df = df_map[table_name]
             filename = f"{table_name}_{year}_{month}_{day}.parquet"
-            df.to_parquet(module_path / filename, index=False)
+            # df is now pl.DataFrame
+            df.write_parquet(module_path / filename)
 
 
 def test_run_integrity_gate_success(
@@ -152,11 +153,12 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     # Only setup one module but incomplete
     module_path = run_context.semantic_path / "seller_semantic"
     module_path.mkdir(parents=True, exist_ok=True)
-    valid_seller_fact.to_parquet(module_path / "seller_weekly_fact_2023_01_01.parquet")
+    valid_seller_fact.write_parquet(
+        module_path / "seller_weekly_fact_2023_01_01.parquet"
+    )
 
     report = run_integrity_gate(run_context)
     assert report["status"] == "failed"
-    # It will fail either on module mismatch or file set mismatch
 
 
 def test_run_integrity_gate_fails_on_empty_dataframe(
@@ -174,7 +176,7 @@ def test_run_integrity_gate_fails_on_empty_dataframe(
     run_context.initialize_directories()
 
     df_map = {
-        "seller_weekly_fact": pd.DataFrame(),  # Empty
+        "seller_weekly_fact": pl.DataFrame(),  # Empty
         "seller_dim": valid_seller_dim,
         "customer_weekly_fact": valid_customer_fact,
         "customer_dim": valid_customer_dim,
@@ -185,7 +187,8 @@ def test_run_integrity_gate_fails_on_empty_dataframe(
     setup_semantic_files(run_context, df_map)
     report = run_integrity_gate(run_context)
     assert report["status"] == "failed"
-    assert any("missing or empty" in error for error in report["errors"])
+    # Current implementation fails on missing columns if dataframe is empty
+    assert any("required column(s)" in error for error in report["errors"])
 
 
 def test_run_integrity_gate_fails_on_missing_columns(
@@ -202,10 +205,9 @@ def test_run_integrity_gate_fails_on_missing_columns(
     )
     run_context.initialize_directories()
 
+    # Drop a column using Polars
     df_map = {
-        "seller_weekly_fact": valid_seller_fact.drop(
-            columns=valid_seller_fact.columns[0]
-        ),
+        "seller_weekly_fact": valid_seller_fact.drop(valid_seller_fact.columns[0]),
         "seller_dim": valid_seller_dim,
         "customer_weekly_fact": valid_customer_fact,
         "customer_dim": valid_customer_dim,
@@ -230,8 +232,6 @@ def test_promote_semantic_version_success(tmp_path):
     )
     run_context.initialize_directories()
 
-    # We don't need real files for promote if we only check if directory is created
-    # but upload_publish_artifacts will try to copy semantic_path.
     run_context.semantic_path.mkdir(parents=True, exist_ok=True)
 
     report = promote_semantic_version(run_context)

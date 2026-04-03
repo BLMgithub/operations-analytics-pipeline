@@ -1,8 +1,8 @@
 # **Validation Stage**
 
 **Files:** 
-* **Executor:** [`validation_executor.py`](../data_pipeline/validation/validation_executor.py)
-* **Logic:** [`validation_logic.py`](../data_pipeline/validation/validation_logic.py)
+* **Executor:** [`validation_executor.py`](../../data_pipeline/validation/validation_executor.py)
+* **Logic:** [`validation_logic.py`](../../data_pipeline/validation/validation_logic.py)
 
 **Role:** Structural Data Quality Gatekeeper.
 

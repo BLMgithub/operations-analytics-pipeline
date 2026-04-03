@@ -1,6 +1,6 @@
 # **Pipeline Orchestrator**
 
-**File:** [`run_pipeline.py`](../data_pipeline/run_pipeline.py)
+**File:** [`run_pipeline.py`](../../data_pipeline/run_pipeline.py)
 
 **Role:** End-to-End Lifecycle, Resource, and Persistence Manager.
 

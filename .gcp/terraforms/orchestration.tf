@@ -1,6 +1,6 @@
 # Google Workflows
 resource "google_workflows_workflow" "pipeline_dispatcher" {
-  name            = "pipeline-trigger-flow-${var.environment}"
+  name            = "pipeline-dispatcher-${var.environment}"
   region          = var.region
   description     = "Evaluates .success files and triggers pipeline"
   service_account = google_service_account.platform_accounts["eventarc-invoker-sa"].email
@@ -12,8 +12,8 @@ resource "google_workflows_workflow" "pipeline_dispatcher" {
 }
 
 # Pipeline Trigger: Eventarc
-resource "google_eventarc_trigger" "archival_success_trigger" {
-  name     = "archival-success-trigger-${var.environment}"
+resource "google_eventarc_trigger" "pipeline_dispatcher" {
+  name     = "pipeline-trigger-${var.environment}"
   location = var.region
 
   # Monitor Archival Bucket
@@ -33,7 +33,6 @@ resource "google_eventarc_trigger" "archival_success_trigger" {
 
   service_account = google_service_account.platform_accounts["eventarc-invoker-sa"].email
 
-  # Waits on these SAs
   depends_on = [
     google_project_iam_member.eventarc_event_receiver,
     google_project_iam_member.eventarc_workflows_invoker
@@ -42,7 +41,7 @@ resource "google_eventarc_trigger" "archival_success_trigger" {
 
 # Drive Extractor Trigger: Cloud Scheduler
 resource "google_cloud_scheduler_job" "extractor_trigger" {
-  name        = "midnight-extractor-trigger-${var.environment}"
+  name        = "midnight-trigger-${var.environment}"
   description = "Execute drive-extractor daily 12AM (PHT)"
   schedule    = "0 0 * * *"
   time_zone   = "Asia/Manila"
@@ -51,7 +50,7 @@ resource "google_cloud_scheduler_job" "extractor_trigger" {
   http_target {
     http_method = "POST"
     # Points to the Deployed Cloud Run job (data extractor)
-    uri = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/drive-extractor:run"
+    uri = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/drive-extractor-${var.environment}:run"
 
     oauth_token {
       service_account_email = google_service_account.platform_accounts["job-invoker-sa"].email

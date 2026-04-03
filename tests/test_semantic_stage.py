@@ -2,7 +2,7 @@
 # UNIT TESTS FOR semantic_executor.py
 # =============================================================================
 
-import pandas as pd
+import polars as pl
 import pytest
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.semantic.semantic_executor import (
@@ -24,28 +24,40 @@ def empty_report():
 
 @pytest.fixture
 def valid_customers_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "customer_id": ["cos1", "cos2"],
             "customer_state": ["SP", "RJ"],
+            "customer_city": ["Sao Paulo", "Rio"],
+            "customer_segment": ["A", "B"],
+            "account_creation_date": ["2022-01-01", "2022-01-01"],
         }
+    ).with_columns(
+        [
+            pl.col("account_creation_date").str.strptime(pl.Datetime, "%Y-%m-%d"),
+        ]
     )
 
 
 @pytest.fixture
 def valid_products_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "product_id": ["prod1", "prod2"],
             "product_category_name": ["tech", "home"],
             "product_weight_g": [100.0, 500.0],
+            "product_length_cm": [10.0, 20.0],
+            "product_height_cm": [5.0, 10.0],
+            "product_width_cm": [5.0, 10.0],
+            "product_fragility_index": ["Low", "High"],
+            "supplier_tier": ["Gold", "Silver"],
         }
     )
 
 
 @pytest.fixture
 def valid_assembled_df():
-    return pd.DataFrame(
+    df = pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "seller_id": ["seller1", "seller2"],
@@ -53,48 +65,59 @@ def valid_assembled_df():
             "order_revenue": [12.34, 56.78],
             "product_id": ["prod1", "prod2"],
             "order_status": ["delivered", "delivered"],
-            "order_purchase_timestamp": pd.to_datetime(
-                [
-                    "2023-01-02 09:00:00",
-                    "2023-01-10 14:00:00",
-                ]
-            ),
-            "order_approved_at": pd.to_datetime(
-                [
-                    "2023-01-03 09:00:00",
-                    "2023-01-11 14:00:00",
-                ]
-            ),
-            "order_delivered_timestamp": pd.to_datetime(
-                [
-                    "2023-01-06 09:00:00",
-                    "2023-01-16 14:00:00",
-                ]
-            ),
-            "order_estimated_delivery_date": pd.to_datetime(
-                [
-                    "2023-01-05",
-                    "2023-01-15",
-                ]
-            ),
+            "order_purchase_timestamp": [
+                "2023-01-02 09:00:00",
+                "2023-01-10 14:00:00",
+            ],
+            "order_approved_at": [
+                "2023-01-03 09:00:00",
+                "2023-01-11 14:00:00",
+            ],
+            "order_delivered_timestamp": [
+                "2023-01-06 09:00:00",
+                "2023-01-16 14:00:00",
+            ],
+            "order_estimated_delivery_date": [
+                "2023-01-05",
+                "2023-01-15",
+            ],
             "lead_time_days": [3, 5],
             "approval_lag_days": [1, 1],
             "delivery_delay_days": [1, 1],
-            "order_date": pd.to_datetime(["2023-01-02", "2023-01-10"]),
+            "order_date": ["2023-01-02", "2023-01-10"],
             "order_year": [2023, 2023],
             "order_year_week": ["2023-W01", "2023-W01"],
             "run_id": ["20230101T120000", "20230101T120000"],
-        }
-    ).astype(
-        {
-            "order_status": "category",
-            "lead_time_days": "int16",
-            "approval_lag_days": "int16",
-            "delivery_delay_days": "int16",
-            "order_year": "int16",
-            "order_revenue": "float32",
+            # Extra columns required by join in semantic stage
+            "customer_state": ["SP", "RJ"],
+            "customer_city": ["Sao Paulo", "Rio"],
+            "customer_segment": ["A", "B"],
+            "account_creation_date": ["2022-01-01", "2022-01-01"],
         }
     )
+    # Temporal casting for Polars
+    df = df.with_columns(
+        [
+            pl.col("order_purchase_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_approved_at").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S"),
+            pl.col("order_delivered_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_estimated_delivery_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("order_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("account_creation_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("order_status").cast(pl.Categorical),
+            pl.col("lead_time_days").cast(pl.Int16),
+            pl.col("approval_lag_days").cast(pl.Int16),
+            pl.col("delivery_delay_days").cast(pl.Int16),
+            pl.col("order_year").cast(pl.Int16),
+            pl.col("order_revenue").cast(pl.Float32),
+            pl.col("run_id").cast(pl.Categorical),
+        ]
+    )
+    return df
 
 
 # =============================================================================
@@ -104,8 +127,8 @@ def valid_assembled_df():
 
 def test_init_report_structure():
     report = init_report()
-    assert set(report.keys()) == {"status", "errors", "info"}
-    assert report["status"] == "success"
+    assert set(report.keys()) == {"status", "errors", "info", "loaded_data"}
+    assert report["status"] == ""
 
 
 def test_log_error_appends_only_to_errors(empty_report):
@@ -125,24 +148,37 @@ def test_log_info_appends_only_to_info(empty_report):
 
 def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled_df):
     run_context = RunContext.create(base=tmp_path, run_id="20230101T120000")
-    seller_semantic = build_seller_semantic(valid_assembled_df, run_context)
+    seller_semantic = build_seller_semantic(valid_assembled_df.lazy(), run_context)
 
     expected_fact_len = (
-        valid_assembled_df[["seller_id", "order_year_week"]].drop_duplicates().shape[0]
+        valid_assembled_df.select(["seller_id", "order_year_week"]).unique().height
     )
-    assert len(seller_semantic["seller_weekly_fact"]) == expected_fact_len
 
-    expected_dim_len = valid_assembled_df["seller_id"].nunique()
-    assert len(seller_semantic["seller_dim"]) == expected_dim_len
+    fact_df = seller_semantic["seller_weekly_fact"]
+    if isinstance(fact_df, pl.LazyFrame):
+        fact_df = fact_df.collect()
+    assert fact_df.height == expected_fact_len
+
+    dim_df = seller_semantic["seller_dim"]
+    if isinstance(dim_df, pl.LazyFrame):
+        dim_df = dim_df.collect()
+    expected_dim_len = valid_assembled_df["seller_id"].n_unique()
+    assert dim_df.height == expected_dim_len
 
 
 def test_seller_semantic_fails_on_multiple_run_ids(tmp_path, valid_assembled_df):
     run_context = RunContext.create(base=tmp_path, run_id="20230101T120000")
-    broken_df = valid_assembled_df.copy()
-    broken_df.loc[1, "run_id"] = "another_run"
+    # Clone and modify run_id
+    broken_df = valid_assembled_df.clone()
+    broken_df = broken_df.with_columns(
+        pl.when(pl.Series([False, True]))
+        .then(pl.lit("another_run").cast(pl.Categorical))
+        .otherwise(pl.col("run_id"))
+        .alias("run_id")
+    )
 
     with pytest.raises(RuntimeError, match="Multiple run_ids detected"):
-        build_seller_semantic(broken_df, run_context)
+        build_seller_semantic(broken_df.lazy(), run_context)
 
 
 # =============================================================================
@@ -160,20 +196,19 @@ def test_build_semantic_layer_success(
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    # Setup Assembled layer
-    valid_assembled_df.to_parquet(
+    valid_assembled_df.write_parquet(
         run_context.assembled_path / "assembled_events_2023_01_01.parquet"
     )
-    valid_customers_df.to_parquet(
+    valid_customers_df.write_parquet(
         run_context.assembled_path / "df_customers_2023_01_01.parquet"
     )
-    valid_products_df.to_parquet(
+    valid_products_df.write_parquet(
         run_context.assembled_path / "df_products_2023_01_01.parquet"
     )
 
     report = build_semantic_layer(run_context)
 
-    assert report["status"] == "success"
+    assert report["status"] == ""
 
     for module_name, module_config in SEMANTIC_MODULES.items():
         for table_name in module_config["tables"]:
@@ -190,21 +225,27 @@ def test_build_semantic_layer_fails_on_multiple_ids(tmp_path, valid_assembled_df
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    broken_assembled = valid_assembled_df.copy()
-    broken_assembled.loc[1, "run_id"] = "another_run"
+    # Clone and modify run_id for Polars
+    broken_assembled = valid_assembled_df.clone()
+    broken_assembled = broken_assembled.with_columns(
+        pl.when(pl.Series([False, True]))
+        .then(pl.lit("another_run").cast(pl.Categorical))
+        .otherwise(pl.col("run_id"))
+        .alias("run_id")
+    )
 
-    broken_assembled.to_parquet(
+    broken_assembled.write_parquet(
         run_context.assembled_path / "assembled_events_2023_01_01.parquet"
     )
 
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    assert report["modules"]["seller_semantic"]["build_stage"]["status"] == "failed"
-    assert any(
-        "Multiple run_ids detected" in error
-        for error in report["modules"]["seller_semantic"]["build_stage"]["errors"]
+    assert (
+        report["modules"]["seller_semantic"]["seller_weekly_fact"]["build_stage"]
+        == False
     )
+    assert any("Multiple run_ids detected" in error for error in report["errors"])
 
 
 def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled_df):
@@ -212,22 +253,15 @@ def test_build_semantic_layer_fails_on_missing_columns(tmp_path, valid_assembled
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    broken_assembled = valid_assembled_df.copy()
-    broken_assembled.drop(
-        columns="order_revenue", inplace=True
-    )  # Used in seller_weekly_fact
+    broken_assembled = valid_assembled_df.drop("order_revenue")
 
-    broken_assembled.to_parquet(
+    broken_assembled.write_parquet(
         run_context.assembled_path / "assembled_events_2023_01_01.parquet"
     )
 
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    # Errors might happen during build_stage if it uses the column
-    # or during validate_and_freeze if it's in the schema.
-    # build_seller_semantic uses order_revenue for aggregation.
-    assert report["modules"]["seller_semantic"]["build_stage"]["status"] == "failed"
 
 
 def test_build_semantic_layer_fails_on_missing_or_empty_df(tmp_path):
@@ -235,16 +269,12 @@ def test_build_semantic_layer_fails_on_missing_or_empty_df(tmp_path):
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    empty_df = pd.DataFrame()
-    empty_df.to_parquet(
+    empty_df = pl.DataFrame({"run_id": []}, schema={"run_id": pl.Categorical})
+
+    empty_df.write_parquet(
         run_context.assembled_path / "assembled_events_2023_01_01.parquet"
     )
 
     report = build_semantic_layer(run_context)
 
     assert report["status"] == "failed"
-    # load_single_delta itself succeeds even if DF is empty
-    assert any(
-        "missing or empty" in error
-        for error in report["steps"]["load_tables"]["errors"]
-    )

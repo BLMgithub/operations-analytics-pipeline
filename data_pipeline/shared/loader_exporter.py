@@ -3,13 +3,14 @@
 # =============================================================================
 
 from pathlib import Path
+import polars as pl
 import pandas as pd
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Any
 
 
 FILE_LOADERS = {
     ".csv": lambda path: pd.read_csv(path),
-    ".parquet": lambda path: pd.read_parquet(path, engine="pyarrow"),
+    ".parquet": lambda path: pd.read_parquet(path),
 }
 
 
@@ -17,7 +18,7 @@ def load_single_delta(
     base_path: Path | str,
     table_name: str,
     log_info: Optional[Callable[[str], None]] = None,
-) -> Tuple[pd.DataFrame, str]:
+) -> Tuple[Any, str]:
     """
     Loads the chronologically most recent delta for a logical table.
 
@@ -66,62 +67,53 @@ def load_historical_table(
     base_path: Path | str,
     table_name: str,
     log_info: Optional[Callable[[str], None]] = None,
-) -> pd.DataFrame:
+) -> pl.LazyFrame:
     """
-    Aggregates all matching artifacts into a single cumulative DataFrame.
+    Aggregates matching artifacts into a single cumulative LazyFrame.
 
     Contract:
-    - Performs a multi-file read of all artifacts matching the 'table_name'.
-    - Concatenates results into a single memory object with index resetting.
+    - Performs a multi-file scan of all Parquet artifacts matching 'table_name'.
+    - Queues files for lazy evaluation rather than loading them into memory.
 
     Outputs:
-    - Returns a unified DataFrame.
+    - Returns a pl.LazyFrame ready for downstream transformations.
     """
     base_path = Path(base_path)
 
-    files = [
-        f
-        for f in base_path.iterdir()
-        if f.is_file()
-        and (f.stem == table_name or f.name.startswith(f"{table_name}_"))
-        and f.suffix.lower() == ".parquet"
-    ]
+    files = [str(f) for f in base_path.glob(f"{table_name}*.parquet")]
 
     if not files:
         raise FileNotFoundError(f"No Parquet files found for {table_name}")
 
-    def get_unified_data(file_list: list[Path]) -> pd.DataFrame:
-        temp_dfs = []
-        for file_path in sorted(file_list):
-            df = pd.read_parquet(file_path, engine="pyarrow")
-            temp_dfs.append(df)
-
-        return pd.concat(temp_dfs, ignore_index=True)
-
-    df_unified = get_unified_data(files)
+    lf_unified = pl.scan_parquet(files)
 
     if log_info:
-        log_info(f"Loaded unified: {table_name} ({len(df_unified)} rows)")
+        log_info(
+            f"Scanned: {table_name} ({len(files)} files queued for lazy evaluation)"
+        )
 
-    return df_unified
+    return lf_unified
 
 
 def export_file(
-    df: pd.DataFrame,
+    df: Any,
     output_path: Path,
     log_info: Optional[Callable[[str], None]] = None,
     log_error: Optional[Callable[[str], None]] = None,
     index: bool = False,
 ) -> bool:
     """
-    Persists DataFrames to disk using system-standard technical formats.
+    Persists DataFrames or LazyFrames to disk using standardized formats.
 
     Contract:
     - Automates directory creation for the target 'output_path'.
     - Enforces Parquet with Brotli compression as the internal standard.
 
+    Optimization Logic:
+    - Streaming Sink: When provided with a pl.LazyFrame, uses sink_parquet() to
+      stream data in chunks, bypassing full in-memory materialization.
+
     Invariants:
-    - Format Determinism: File extension (.csv vs .parquet) dictates the engine used.
     - Compression: Parquet exports always utilize 'brotli' to optimize storage.
 
     Returns:
@@ -131,27 +123,28 @@ def export_file(
     output_path = Path(output_path)
 
     try:
-        # Ensure parent directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        ext = output_path.suffix.lower()
+        row_count = 0
 
-        if ext == ".csv":
-            df.to_csv(output_path, index=index)
-
-        elif ext == ".parquet":
+        if isinstance(df, pd.DataFrame):
             df.to_parquet(
                 output_path, index=index, engine="pyarrow", compression="brotli"
             )
+            row_count = len(df)
+
+        elif isinstance(df, pl.DataFrame):
+            df.write_parquet(output_path, compression="brotli")
+            row_count = len(df)
+
+        elif isinstance(df, pl.LazyFrame):
+            df.sink_parquet(output_path, compression="brotli")
+            row_count = "streaming"
 
         else:
-            raise ValueError(
-                f'Unsupported file extension: "{ext}". ' "Supported: .csv, .parquet"
-            )
+            raise TypeError(f"Unsupported DataFrame type provided: {type(df)}")
 
         if log_info:
-            log_info(
-                f"Exported {ext} file: " f"{output_path.name} " f"({len(df)} rows)"
-            )
+            log_info(f"Exported file: {output_path.name} ({row_count} rows)")
 
         return True
 

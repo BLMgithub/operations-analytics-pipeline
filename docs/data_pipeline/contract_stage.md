@@ -1,9 +1,9 @@
 # **Data Contract Stage**
 
 **Files:**
-* **Executor:** [`contract_executor.py`](../data_pipeline/contract/contract_executor.py)
-* **Logic:** [`contract_logic.py`](../data_pipeline/contract/contract_logic.py)
-* **Registry:** [`registry.py`](../data_pipeline/contract/registry.py)
+* **Executor:** [`contract_executor.py`](../../data_pipeline/contract/contract_executor.py)
+* **Logic:** [`contract_logic.py`](../../data_pipeline/contract/contract_logic.py)
+* **Registry:** [`registry.py`](../../data_pipeline/contract/registry.py)
 
 **Role:** Structural Enforcement and Subtractive Filtering.
 

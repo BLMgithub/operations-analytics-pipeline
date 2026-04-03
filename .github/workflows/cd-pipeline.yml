@@ -7,7 +7,7 @@ on:
       - main
     paths:
       - 'data_pipeline/**'
-      - '.github/workflows/deploy-pipeline.yml'
+      - '.github/workflows/cd-pipeline.yml'
   
   # Manual run
   workflow_dispatch:
@@ -19,32 +19,33 @@ permissions:
 # Service configurations in GCP
 env:
   REGION: us-east1
-  REPO_NAME: operations-artifacts
+  REPO_NAME: operations-artifacts-dev
   IMAGE_NAME: pipeline
   JOB_NAME: operations-pipeline
 
 jobs:
+  # Call CI-Infra
+  infrastructure-check:
+    uses: ./.github/workflows/ci-infra.yml
+    secrets: inherit
+
   build-and-deploy:
+    needs: infrastructure-check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      # Handshake to GCP
+        
+        # Handshake to GCP
       - name: Authenticate to Google Cloud
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.DEPLOYER_SA_EMAIL }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      # Handshake to Artifact registry
+        # Handshake to Artifact registry
       - name: Configure Docker Auth
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
 
       - name: Build and Push Docker Image
         run: |
@@ -56,17 +57,11 @@ jobs:
           
           # Push to Artifact Registry
           docker push $IMAGE_PATH
-
       
-      - name: Deploy to Cloud Run Job
+      - name: Update Cloud Run Job
         run: |
           IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           
-          gcloud run jobs deploy ${{ env.JOB_NAME }} \
+          gcloud run jobs update ${{ env.JOB_NAME }} \
             --image $IMAGE_PATH \
-            --region ${{ env.REGION }} \
-            --service-account ${{ secrets.PIPELINE_SA_EMAIL }} \
-            --memory 4Gi \
-            --cpu 2 \
-            --task-timeout 30m \
-            --max-retries 0
+            --region ${{ env.REGION }}

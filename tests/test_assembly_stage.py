@@ -2,12 +2,11 @@
 # UNIT TESTS FOR assembly_executor.py
 # =============================================================================
 
-import pandas as pd
+import polars as pl
 import pytest
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.assembly.assembly_logic import log_info, log_error, init_report
 from data_pipeline.assembly.assembly_executor import (
-    init_stage_report,
     merge_data,
     derive_fields,
     freeze_schema,
@@ -24,7 +23,7 @@ def empty_report():
 
 @pytest.fixture
 def valid_orders_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "customer_id": ["cos1", "cos2"],
@@ -46,12 +45,23 @@ def valid_orders_df():
                 "2023-01-15",
             ],
         }
+    ).with_columns(
+        [
+            pl.col("order_purchase_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_approved_at").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S"),
+            pl.col("order_delivered_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_estimated_delivery_date").str.strptime(pl.Date, "%Y-%m-%d"),
+        ]
     )
 
 
 @pytest.fixture
 def valid_order_items_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "product_id": ["prod1", "prod2"],
@@ -64,7 +74,7 @@ def valid_order_items_df():
 
 @pytest.fixture
 def valid_payments_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "payment_sequential": [1, 2],
@@ -77,28 +87,40 @@ def valid_payments_df():
 
 @pytest.fixture
 def valid_customers_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "customer_id": ["cos1", "cos2"],
             "customer_state": ["SP", "RJ"],
+            "customer_city": ["Sao Paulo", "Rio"],
+            "customer_segment": ["A", "B"],
+            "account_creation_date": ["2022-01-01", "2022-01-01"],
         }
+    ).with_columns(
+        [
+            pl.col("account_creation_date").str.strptime(pl.Datetime, "%Y-%m-%d"),
+        ]
     )
 
 
 @pytest.fixture
 def valid_products_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "product_id": ["prod1", "prod2"],
             "product_category_name": ["tech", "home"],
             "product_weight_g": [100.0, 500.0],
+            "product_length_cm": [10.0, 20.0],
+            "product_height_cm": [5.0, 10.0],
+            "product_width_cm": [5.0, 10.0],
+            "product_fragility_index": ["Low", "High"],
+            "supplier_tier": ["Gold", "Silver"],
         }
     )
 
 
 @pytest.fixture
 def valid_derived_df():
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "seller_id": ["seller1", "seller2"],
@@ -125,17 +147,25 @@ def valid_derived_df():
             "lead_time_days": [3, 5],
             "approval_lag_days": [1, 1],
             "delivery_delay_days": [1, 1],
-            "order_date": pd.to_datetime(["2023-01-02", "2023-01-10"]),
+            "order_date": ["2023-01-02", "2023-01-10"],
             "order_year": [2023, 2023],
             "order_year_week": ["2023-W01", "2023-W02"],
             "run_id": "20230101T120000",
         }
     )
-    # Ensure some columns are typed correctly before freeze_schema
-    df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
-    df["order_approved_at"] = pd.to_datetime(df["order_approved_at"])
-    df["order_delivered_timestamp"] = pd.to_datetime(df["order_delivered_timestamp"])
-    df["order_date"] = pd.to_datetime(df["order_date"])
+    df = df.with_columns(
+        [
+            pl.col("order_purchase_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_approved_at").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S"),
+            pl.col("order_delivered_timestamp").str.strptime(
+                pl.Datetime, "%Y-%m-%d %H:%M:%S"
+            ),
+            pl.col("order_estimated_delivery_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("order_date").str.strptime(pl.Date, "%Y-%m-%d"),
+        ]
+    )
     return df
 
 
@@ -146,15 +176,10 @@ def valid_derived_df():
 
 def test_init_report_structure():
     report = init_report()
-    assert set(report.keys()) == {"status", "errors", "info"}
-    assert report["status"] == "success"
-
-
-def test_init_stage_report_structure():
-    report = init_stage_report()
-    assert report["status"] == "success"
-    assert "steps" in report
-    assert "merge_events" in report["steps"]
+    assert report["status"] == ""
+    assert "errors" in report
+    assert "info" in report
+    assert "loaded_data" in report
 
 
 def test_log_error_appends_only_to_errors(empty_report):
@@ -184,34 +209,39 @@ def test_merge_data_preserve_grain(
             "df_payments": valid_payments_df,
         }
     )
-    assert len(result) == 2
-    assert result["order_id"].duplicated().any() == False
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+
+    assert result.height == 2
+    assert result.select(pl.col("order_id").is_duplicated().any()).item() == False
     assert "order_revenue" in result.columns
 
 
-def test_merge_detects_cardinality_violation(
+def test_merge_data_aggregates_duplicates(
     valid_orders_df,
     valid_order_items_df,
 ):
-    # Duplicate item for same order_id
-    duplicated_items_df = valid_order_items_df.copy()
-    duplicated_items_df.iloc[1] = duplicated_items_df.iloc[0]
 
-    assert (
-        duplicated_items_df.iloc[0]["order_id"]
-        == duplicated_items_df.iloc[1]["order_id"]
+    duplicated_items_df = pl.concat(
+        [valid_order_items_df, valid_order_items_df.slice(0, 1)]
     )
 
-    with pytest.raises(RuntimeError, match="Cardinality violation"):
-        merge_data(
-            {
-                "df_orders": valid_orders_df,
-                "df_order_items": duplicated_items_df,
-                "df_payments": pd.DataFrame(
-                    {"order_id": ["o1", "o2"], "payment_value": [10, 20]}
-                ),
-            }
-        )
+    assert duplicated_items_df["order_id"][0] == duplicated_items_df["order_id"][2]
+
+    result = merge_data(
+        {
+            "df_orders": valid_orders_df,
+            "df_order_items": duplicated_items_df,
+            "df_payments": pl.DataFrame(
+                {"order_id": ["o1", "o2"], "payment_value": [10.0, 20.0]}
+            ),
+        }
+    )
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+
+    assert result.height == 2
+    assert result.select(pl.col("order_id").is_duplicated().any()).item() == False
 
 
 # =============================================================================
@@ -220,24 +250,15 @@ def test_merge_detects_cardinality_violation(
 
 
 def test_derived_fields_correctness(valid_derived_df):
-    source_cols = [
-        "order_id",
-        "seller_id",
-        "product_id",
-        "order_status",
-        "order_purchase_timestamp",
-        "order_approved_at",
-        "order_delivered_timestamp",
-        "order_estimated_delivery_date",
-    ]
+    result = derive_fields(valid_derived_df, "20230101T120000")
 
-    source_df = valid_derived_df[source_cols].copy()
-    result = derive_fields(source_df, "20230101T120000")
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
 
-    assert result["lead_time_days"].tolist() == [3, 5]
-    assert result["approval_lag_days"].tolist() == [1, 1]
-    assert result["delivery_delay_days"].tolist() == [1, 1]
-    assert result["run_id"].unique()[0] == "20230101T120000"
+    assert result["lead_time_days"].to_list() == [3, 5]
+    assert result["approval_lag_days"].to_list() == [1, 1]
+    assert result["delivery_delay_days"].to_list() == [1, 1]
+    assert result.select(pl.col("run_id").unique()).item() == "20230101T120000"
     assert "order_year_week" in result.columns
 
 
@@ -249,14 +270,19 @@ def test_derived_fields_correctness(valid_derived_df):
 def test_freeze_schema_enforces_strict_schema_success(valid_derived_df):
     result = freeze_schema(valid_derived_df)
 
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+
     for col, expected_dtype in ASSEMBLE_DTYPES.items():
-        assert str(result[col].dtype).startswith(str(expected_dtype))
+        assert result[col].dtype == expected_dtype
 
 
 def test_freeze_schema_fails_on_missing_column(valid_derived_df):
-    missing_required_column = valid_derived_df.drop(columns="seller_id")
+    missing_required_column = valid_derived_df.drop("seller_id")
     with pytest.raises(RuntimeError, match="missing required columns"):
-        freeze_schema(missing_required_column)
+        result = freeze_schema(missing_required_column)
+        if isinstance(result, pl.LazyFrame):
+            result.collect()
 
 
 # =============================================================================
@@ -276,20 +302,20 @@ def test_assemble_data_success(
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    # Setup Silver layer
-    valid_orders_df.to_parquet(run_context.contracted_path / "df_orders.parquet")
-    valid_order_items_df.to_parquet(
+    valid_orders_df.write_parquet(run_context.contracted_path / "df_orders.parquet")
+    valid_order_items_df.write_parquet(
         run_context.contracted_path / "df_order_items.parquet"
     )
-    valid_payments_df.to_parquet(run_context.contracted_path / "df_payments.parquet")
-    valid_customers_df.to_parquet(run_context.contracted_path / "df_customers.parquet")
-    valid_products_df.to_parquet(run_context.contracted_path / "df_products.parquet")
+    valid_payments_df.write_parquet(run_context.contracted_path / "df_payments.parquet")
+    valid_customers_df.write_parquet(
+        run_context.contracted_path / "df_customers.parquet"
+    )
+    valid_products_df.write_parquet(run_context.contracted_path / "df_products.parquet")
 
     report = assemble_events(run_context)
 
     assert report["status"] == "success"
 
-    # Check output files
     assert (run_context.assembled_path / "assembled_events_2023_01_01.parquet").exists()
     assert (run_context.assembled_path / "df_customers_2023_01_01.parquet").exists()
     assert (run_context.assembled_path / "df_products_2023_01_01.parquet").exists()
@@ -305,57 +331,22 @@ def test_assemble_data_fails_on_missing_column(
     run_context = RunContext.create(base=tmp_path, run_id=run_id)
     run_context.initialize_directories()
 
-    # Missing seller_id in order_items
-    invalid_order_items_df = valid_order_items_df.drop(columns="seller_id")
+    invalid_order_items_df = valid_order_items_df.drop("seller_id")
 
-    valid_orders_df.to_parquet(run_context.contracted_path / "df_orders.parquet")
-    invalid_order_items_df.to_parquet(
+    valid_orders_df.write_parquet(run_context.contracted_path / "df_orders.parquet")
+    invalid_order_items_df.write_parquet(
         run_context.contracted_path / "df_order_items.parquet"
     )
-    valid_payments_df.to_parquet(run_context.contracted_path / "df_payments.parquet")
+    valid_payments_df.write_parquet(run_context.contracted_path / "df_payments.parquet")
 
     report = assemble_events(run_context)
 
     assert report["status"] == "failed"
-    assert report["steps"]["freeze_schema"]["status"] == "failed"
+    assert report["assembled_events"]["freeze_schema"] == False
     assert any(
-        "missing required columns: ['seller_id']" in error
-        for error in report["steps"]["freeze_schema"]["errors"]
-    )
-
-
-def test_assemble_data_fails_on_cardinality(
-    tmp_path,
-    valid_orders_df,
-    valid_order_items_df,
-):
-    run_id = "20230101T120000"
-    run_context = RunContext.create(base=tmp_path, run_id=run_id)
-    run_context.initialize_directories()
-
-    # Duplicated payments
-    duplicated_payments_df = pd.DataFrame(
-        {
-            "order_id": ["o1", "o1"],
-            "payment_value": [100.1, 100.1],
-        }
-    )
-
-    valid_orders_df.to_parquet(run_context.contracted_path / "df_orders.parquet")
-    valid_order_items_df.to_parquet(
-        run_context.contracted_path / "df_order_items.parquet"
-    )
-    duplicated_payments_df.to_parquet(
-        run_context.contracted_path / "df_payments.parquet"
-    )
-
-    report = assemble_events(run_context)
-
-    assert report["status"] == "failed"
-    assert report["steps"]["merge_events"]["status"] == "failed"
-    assert any(
-        "Cardinality violation" in error
-        for error in report["steps"]["merge_events"]["errors"]
+        "missing required columns" in error
+        or 'unable to find column "seller_id"' in error
+        for error in report["errors"]
     )
 
 
@@ -365,24 +356,24 @@ def test_assemble_data_fails_on_cardinality(
 
 
 def test_dimension_references_uniqueness():
-    df = pd.DataFrame({"id": ["1", "1", "2"], "val": ["a", "a", "b"]})
+    df = pl.DataFrame({"id": ["1", "1", "2"], "val": ["a", "a", "b"]})
 
-    # This should work and drop duplicates
-    result = dimension_references(df, "test", ["id"], ["id", "val"])
-    assert len(result) == 2
+    result = dimension_references(df.lazy(), "test", ["id"], ["id", "val"])
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+    assert result.height == 2
 
-    # If duplicates persist (e.g. same ID different values, but logic says drop_duplicates on subset pk)
-    # Actually dimension_references uses drop_duplicates(subset=primary_key)
-    # and then checks if duplicated.any().
-    # So it should never fail unless something is very wrong with pandas.
+    df_conflict = pl.DataFrame({"id": ["1", "1"], "val": ["a", "b"]})
 
-    df_conflict = pd.DataFrame({"id": ["1", "1"], "val": ["a", "b"]})
-    # drop_duplicates(subset=['id']) will keep the first row.
-    result = dimension_references(df_conflict, "test", ["id"], ["id", "val"])
-    assert len(result) == 1
+    result = dimension_references(df_conflict.lazy(), "test", ["id"], ["id", "val"])
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+    assert result.height == 1
 
 
 def test_dimension_references_fails_if_cols_missing():
-    df = pd.DataFrame({"id": ["1"]})
-    with pytest.raises(KeyError):
-        dimension_references(df, "test", ["id"], ["id", "missing"])
+    df = pl.DataFrame({"id": ["1"]})
+    from polars.exceptions import ColumnNotFoundError
+
+    with pytest.raises((KeyError, ColumnNotFoundError)):
+        dimension_references(df.lazy(), "test", ["id"], ["id", "missing"])

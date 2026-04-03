@@ -2,7 +2,7 @@
 # Publish Stage Logic
 # =============================================================================
 
-import pandas as pd
+import polars as pl
 from datetime import datetime as dt
 from contextlib import suppress
 from pathlib import Path
@@ -106,23 +106,9 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
             file_name = f"{table_name}_{year}_{month}_{day}.parquet"
             file_path = module_path / file_name
 
-            try:
-                df = pd.read_parquet(file_path)
-
-            except Exception as e:
-                log_error(str(e), report)
-                report["status"] = "failed"
-
-                continue
-
-            if df is None or df.empty:
-                log_error(f"{file_name} logical table missing or empty", report)
-                report["status"] = "failed"
-
-                return report
-
             # Validate required schema columns present
-            missing = set(meta["schema"]) - set(df.columns)
+            schema = pl.scan_parquet(file_path).collect_schema()
+            missing = set(meta["schema"]) - set(schema.keys())
 
             if missing:
                 log_error(f"{file_name} required column(s): {sorted(missing)}", report)

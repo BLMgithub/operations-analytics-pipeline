@@ -1,8 +1,8 @@
 # **Publish Stage**
 
 **Files:**
-* **Executor:** [`publish_executor.py`](../data_pipeline/publish/publish_executor.py)
-* **Logic:** [`publish_logic.py`](../data_pipeline/publish/publish_logic.py)
+* **Executor:** [`publish_executor.py`](../../data_pipeline/publish/publish_executor.py)
+* **Logic:** [`publish_logic.py`](../../data_pipeline/publish/publish_logic.py)
 
 **Role:** Production Promotion and Versioning.
 

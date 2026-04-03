@@ -35,6 +35,10 @@ def apply_contract(
     - Finality: The 'enforce_schema' step guarantees the artifact matches the system registry.
     - Referential Integrity: Tables processed after 'df_orders' use its output for parent-check filtering.
 
+    Failure Behavior:
+    - Traps logic-step exceptions via a try-except block within the ROLE_STEPS loop.
+    - Marks stage status as 'failed' and returns early upon encountering any transformation error.
+
     Returns:
         tuple: (Stage Report Dict, Newly Invalidated IDs Set, Validated Order IDs Set)
     """
@@ -75,7 +79,7 @@ def apply_contract(
     required_column = config.get("required_column", [])
     dtypes = config.get("dtypes", {})
 
-    df, filename = load_single_delta(base_path, table_name)
+    df, filename = load_single_delta(base_path=base_path, table_name=table_name)
 
     if df is None:
         report["status"] = "failed"

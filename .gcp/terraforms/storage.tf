@@ -1,6 +1,6 @@
 # Archival Bucket
 resource "google_storage_bucket" "ops_archival_bucket" {
-  name                        = "ops-archival-bucket-${var.environment}"
+  name                        = "ops-archival-storage-${var.environment}"
   location                    = var.region
   force_destroy               = false
   uniform_bucket_level_access = true
@@ -30,7 +30,7 @@ resource "google_storage_bucket" "ops_archival_bucket" {
 
 # Pipeline Bucket
 resource "google_storage_bucket" "ops_pipeline_bucket" {
-  name                        = "ops-pipeline-bucket-${var.environment}"
+  name                        = "ops-pipeline-storage-${var.environment}"
   location                    = var.region
   force_destroy               = false
   uniform_bucket_level_access = true

@@ -28,8 +28,8 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
   }
 }
 
-# CLI output 
 output "GITHUB_WIF_PROVIDER_NAME" {
   value       = google_iam_workload_identity_pool_provider.github_provider.name
   description = "GitHub Repository Secret: WIF_PROVIDER"
+  sensitive   = true
 }

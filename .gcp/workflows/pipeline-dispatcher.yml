@@ -31,7 +31,7 @@ main:
             - execute:
                 call: googleapis.run.v1.namespaces.jobs.run
                 args:
-                  name: ${"namespaces/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/jobs/operations-pipeline"}
+                  name: ${"namespaces/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/jobs/operations-pipeline-dev"}
                   location: "us-east1"
                 result: job_output
             - on_success:

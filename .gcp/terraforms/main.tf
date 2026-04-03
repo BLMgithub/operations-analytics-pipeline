@@ -1,6 +1,23 @@
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
 provider "google" {
   project = var.project_id
   region  = var.region
+}
+
+# Upload tfstate to state storage
+terraform {
+  backend "gcs" {
+    bucket = "operations-terraform-state-vault-2026"
+    prefix = "terraform/state"
+  }
 }
 
 # Enable needed GCP APIs
@@ -12,7 +29,7 @@ locals {
     "workflows.googleapis.com",
     "eventarc.googleapis.com",
     "cloudscheduler.googleapis.com",
-    "iamcredentials.googleapis.com"
+    "iamcredentials.googleapis.com",
   ]
 }
 

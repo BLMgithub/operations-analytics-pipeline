@@ -17,9 +17,9 @@ from data_pipeline.validation.validation_logic import (
     run_cross_table_validations,
 )
 
-# ------------------------------------------------------------
+# =============================================================================
 # FIXTURES (REFACETORED SCHEMAS)
-# ------------------------------------------------------------
+# =============================================================================
 
 
 @pytest.fixture
@@ -94,9 +94,9 @@ def valid_products_df():
     )
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # LOGGING TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_init_report():
@@ -117,9 +117,9 @@ def test_log_functions(empty_report):
     assert "error msg" in empty_report["errors"]
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # BASE VALIDATION TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_run_base_validations_success(valid_customers_df, empty_report):
@@ -186,9 +186,9 @@ def test_run_base_validations_duplicate_columns(empty_report):
     assert any("duplicate column names detected" in w for w in empty_report["warnings"])
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # EVENT FACT VALIDATION TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_run_event_fact_validations_success(valid_orders_df, empty_report):
@@ -212,9 +212,9 @@ def test_run_event_fact_validations_unparsable_ts(valid_orders_df, empty_report)
     assert any("unparsable timestamp values" in w for w in empty_report["warnings"])
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # TRANSACTION DETAIL VALIDATION TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_run_transaction_detail_validations_negative(empty_report):
@@ -224,9 +224,9 @@ def test_run_transaction_detail_validations_negative(empty_report):
     assert any("negative values in numeric column" in e for e in empty_report["errors"])
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # CROSS-TABLE VALIDATION TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_run_cross_table_validations_orphans(empty_report):
@@ -240,9 +240,9 @@ def test_run_cross_table_validations_orphans(empty_report):
     assert any("orphan records" in w for w in empty_report["warnings"])
 
 
-# ------------------------------------------------------------
+# =============================================================================
 # APPLY VALIDATION (EXECUTOR) TESTS
-# ------------------------------------------------------------
+# =============================================================================
 
 
 def test_apply_validation_integration(

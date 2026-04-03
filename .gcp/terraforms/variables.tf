@@ -18,3 +18,9 @@ variable "github_repo" {
   description = "GitHub Repository (Format: owner/repository)"
   type        = string
 }
+
+variable "alert_email_map" {
+  type        = map(string)
+  description = "List of emails to receive pipeline alerts"
+  sensitive   = true
+}

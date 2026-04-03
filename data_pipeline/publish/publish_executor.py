@@ -33,6 +33,10 @@ def execute_publish_lifecycle(run_context: RunContext) -> Dict:
     - Immutability: Promoted versions are treated as static snapshots.
     - Fail-Fast: Any failure in the lifecycle prevents version activation.
 
+    Failure Behavior:
+    - Explicit Fail-Fast: Uses 'fail_step' helper to terminate the lifecycle and
+      mark status as 'failed' immediately after any step failure.
+
     Returns:
         Dict: A global publish report containing status and step-level logs.
     """

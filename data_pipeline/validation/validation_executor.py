@@ -38,6 +38,10 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     - Comprehensive Reporting: Captures all failures across all tables before returning; does not fail-fast on the first table error.
     - Severity: Structural issues are logged as 'errors' while referential issues are 'warnings'.
 
+    Failure Behavior:
+    - Non-Blocking: Continues processing remaining tables even if one fails base validations.
+    - Status Update: Sets global report status to 'failed' if any errors or warnings are accumulated.
+
     Returns:
         Dict: A unified validation report containing 'status' and detailed finding lists.
     """
@@ -54,8 +58,8 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     for table_name, config in TABLE_CONFIG.items():
 
         df, _ = load_single_delta(
-            base_path,
-            table_name,
+            base_path=base_path,
+            table_name=table_name,
             log_info=lambda msg: log_info(msg, report),
         )
 

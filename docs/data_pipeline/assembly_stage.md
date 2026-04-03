@@ -1,8 +1,8 @@
 # **Assembly Stage**
 
 **Files:**
-* **Executor:** [`assembly_executor.py`](../data_pipeline/assembly/assembly_executor.py)
-* **Logic:** [`assembly_logic.py`](../data_pipeline/assembly/assembly_logic.py)
+* **Executor:** [`assembly_executor.py`](../../data_pipeline/assembly/assembly_executor.py)
+* **Logic:** [`assembly_logic.py`](../../data_pipeline/assembly/assembly_logic.py)
 
 **Role:** Data Integration and Analytical Flattening.
 
@@ -34,9 +34,12 @@ The **Executor** coordinates two distinct sub-orchestrations:
 ### **Workflow I: Event Assembly**
 1.  **Batch Load:** Fetches the required triplet (`orders`, `items`, `payments`) from the Silver zone.
 2.  **Merge:** Joins datasets using `merge_data`. It performs an inner join on items and a left join on payments to preserve financial data without losing order context.
+    *   **Optimization:** Employs Hash-Joins on `UInt64` keys derived from `order_id` to drastically reduce memory overhead for high-cardinality UUIDs. Utilizes pre-aggregation on payments and items to ensure a strict 1:1 grain, preventing row explosions.
 3.  **Derivation:** Executes `derive_fields` to calculate fulfillment lead times and extract ISO-calendar attributes.
+    *   **Optimization:** Applies memory-efficient casting (e.g., `Int16` for durations, `Categorical` for repetitive strings) and drops intermediate columns early to minimize row width.
 4.  **Schema Freeze:** Projects the final `ASSEMBLE_SCHEMA` and casts all columns to `ASSEMBLE_DTYPES`.
-5.  **Export & Clean:** Persists the table and triggers `gc.collect()` to free memory before dimension processing.
+    *   **Optimization:** Omitted sorting to enable zero-copy streaming, maintaining a non-blocking execution plan compatible with `sink_parquet()`.
+5.  **Export & Clean:** Persists the table using `sink_parquet()` for streaming output and triggers `gc.collect()` to free memory before dimension processing.
 
 ### **Workflow II: Dimension Reference Extraction**
 1.  **Selection:** Iterates through the `DIMENSION_REFERENCES` registry.
@@ -51,16 +54,18 @@ The **Executor** coordinates two distinct sub-orchestrations:
 | Calculate time-deltas (e.g., `lead_time_days`). | Perform complex multi-stage aggregations (delegated to Semantic stage). |
 | Enforce 1:1 cardinality for the final event grain. | Handle schema validation of raw data. |
 | Deduplicate dimension attributes. | Manage partitioning logic (managed by the loader/exporter). |
-| Manage peak memory via explicit `gc` triggers. | Change historical values or re-map IDs. |
+| Manage peak memory via explicit `gc` triggers and concurrency control. | Change historical values or re-map IDs. |
+| Utilize Hash-Joins for high-cardinality keys. | Perform blocking sorts on large datasets. |
 
 ## **Failure & Severity Model**
 
 ### **Operational Failures (System Level)**
+* **Task Failure:** Individual transformation steps (Merge, Derive, Freeze) are wrapped in a fail-safe `task_wrapper`. Exceptions are trapped, logged, and return a `failed` status for that step.
+* **Executor Trapping:** The top-level orchestration in `assembly_executor.py` uses `try-except-finally` blocks to catch and log unexpected pipeline crashes while ensuring memory reclamation.
 * **Loading Missing Table:** If a required table (e.g., `df_orders`) is missing from the Silver zone, the stage returns `failed` immediately.
 * **Export Failure:** Disk I/O errors or path resolution issues during the `export_file` call halt the lifecycle.
 
 ### **Functional Findings (Data Level)**
-
-* **Cardinality Explosion:** If `merge_data` detects multiple rows for a single `order_id`, it raises a `RuntimeError`, treating it as a fatal violation of the analytical grain.
-* **Reference Duplication:** If a dimension table contains duplicate primary keys after extraction, it raises a `RuntimeError` to prevent downstream join corruption.
+* **Cardinality Explosion:** If `merge_data` detects multiple rows for a single `order_id`, it raises a `RuntimeError`. This is caught by the `task_wrapper` and treated as a fatal violation.
+* **Reference Duplication:** If a dimension table contains duplicate primary keys after extraction, it raises a `RuntimeError` which is trapped by the `task_wrapper`.
 * **Partial Payments:** Orders without payments are allowed (via Left Join); the system fills these with `None/NaN`, which is considered a valid business state rather than a failure.

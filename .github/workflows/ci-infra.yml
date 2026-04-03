@@ -1,0 +1,52 @@
+name: CI - Infrastructure Enforcement
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.gcp/terraforms/**'
+      - '.github/workflows/ci-infra.yml'
+  
+  # Allows manual and CDs to call this
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+env:
+  ENV: dev
+  REGION: us-east1
+  GITHUB_REPO: BLMgithub/operations-analytics-pipeline
+
+jobs:
+  terraform-enforce:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .gcp/terraforms
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEPLOYER_SA_EMAIL }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply (Sync)
+        run: |
+          terraform apply -auto-approve \
+          -var="env=${{env.ENV}}" \
+          -var="project_id=${{ secrets.GCP_PROJECT_ID}}" \
+          -var="region=${{env.REGION}}" \
+          -var="alert_email_map=${{ secrets.ALERT_EMAIL_MAP }}"
