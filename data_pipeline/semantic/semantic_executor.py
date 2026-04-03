@@ -90,7 +90,10 @@ def orchestrate_module(
     module_report = report["modules"]
 
     table_trackers = {
-        table_name: {"build_stage": False, "validate_stage": False}
+        table_name: {
+            "build_stage": False,
+            "validate_stage": False,
+        }
         for table_name in module_config["tables"]
     }
     module_report[module_name] = {**table_trackers, "export": False}
@@ -129,6 +132,7 @@ def orchestrate_module(
         try:
             if table_name not in module_config["tables"]:
                 report["status"] = "failed"
+
                 return False
 
             table_config = module_config["tables"][table_name]

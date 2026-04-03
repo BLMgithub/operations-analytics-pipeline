@@ -77,7 +77,7 @@ def get_valid_files(
     - Returns an empty list if the folder is empty or contains only reserved files.
     """
 
-    # Validate instruction inside the folder
+    # Validate instruction.txt inside the folder
     if not check_handshake(drive_api, folder_id):
         print(f"[ERROR]: '{target_folder}' missing instruction.txt or upload not safe.")
         return None
