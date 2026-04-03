@@ -1,4 +1,4 @@
-name: Deploy Data Pipeline Job
+name: CD - Data Pipeline
 
 # Only run when merged changes happen in data_pipeline folder
 on:
@@ -24,7 +24,7 @@ env:
   JOB_NAME: operations-pipeline-dev
 
 jobs:
-  # Call CI-Infra
+  # Call CI-Infra first
   infrastructure-check:
     uses: ./.github/workflows/ci-infra.yml
     secrets: inherit

@@ -1,4 +1,4 @@
-name: Deploy Data Extract Job
+name: CD - Data Extractor
 
 # Only run when merged changes happen in data_extract folder
 on:
@@ -24,7 +24,7 @@ env:
   JOB_NAME: drive-extractor-dev
 
 jobs:
-  # Call CI-Infra
+  # Call CI-Infra first
   infrastructure-check:
     uses: ./.github/workflows/ci-infra.yml
     secrets: inherit
