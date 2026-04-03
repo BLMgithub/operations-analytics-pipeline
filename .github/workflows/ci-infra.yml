@@ -44,9 +44,9 @@ jobs:
         run: terraform init
 
       - name: Terraform Apply (Sync)
-        run: |
-          terraform apply -auto-approve \
-          -var="env=${{env.ENV}}" \
-          -var="project_id=${{ secrets.GCP_PROJECT_ID}}" \
-          -var="region=${{env.REGION}}" \
-          -var="alert_email_map=${{ secrets.ALERT_EMAIL_MAP }}"
+        env:
+          TF_VAR_environment: ${{ env.ENV }}
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_alert_email_map: ${{ secrets.ALERT_EMAIL_MAP }}
+        run: terraform apply -auto-approve
