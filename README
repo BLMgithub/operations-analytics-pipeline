@@ -1,0 +1,6 @@
+<p align="center">
+  <a href="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/ci-code.yml"><img src="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/ci-code.yml/badge.svg" alt="CI - Code Quality"></a>
+  <a href="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/ci-infra.yml"><img src="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/ci-infra.yml/badge.svg" alt="CI - Infra"></a>
+  <a href="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/cd-extract.yml"><img src="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/cd-extract.yml/badge.svg" alt="CD - Extract"></a>
+  <a href="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/cd-pipeline.yml"><img src="https://github.com/BLMgithub/operations-analytics-pipeline/actions/workflows/cd-pipeline.yml/badge.svg" alt="CD - Pipeline"></a>
+</p>
