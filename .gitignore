@@ -5,6 +5,7 @@ __pycache__/
 
 # Runtime Directory
 runtime/
+/data/raw
 data/published/
 data/run_artifact
 data/contracted/
@@ -12,6 +13,7 @@ assets/benchmarks/benchmark.py
 
 # local editor configs
 pyrightconfig.json
+troubleshoot/
 
 # C extensions
 *.so
