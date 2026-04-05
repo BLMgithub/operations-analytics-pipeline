@@ -17,8 +17,12 @@ resource "google_cloud_run_v2_job" "pipeline" {
         resources {
           limits = {
             cpu    = "2"
-            memory = "4Gi"
+            memory = "8Gi"
           }
+        }
+        env {
+          name  = "POLARS_MAX_THREADS"
+          value = "2"
         }
       }
     }

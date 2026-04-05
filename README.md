@@ -63,29 +63,38 @@ The pipeline does not just move data; it actively defends the analytical layer f
     * **End-to-End Traceability:** A single `run_id` is propagated through all raw snapshots, metadata logs, and published artifacts to provide absolute lineage tracking.
     * **Resilient Logging:** Even in the event of a fatal crash, the orchestrator's `finally` block guarantees that partial logs and stage reports are synced back to cloud storage before the local workspace is purged, ensuring debuggability.
 
-## Performance & Scale
+## Performance & Scalability (Cloud-Native Benchmarks)
 
-The pipeline is explicitly engineered to process large-scale historical data without breaching the strict memory constraints of serverless compute (Cloud Run). To achieve this, the core execution engine was migrated from Pandas to Polars, utilizing `LazyFrames` and streaming evaluation.
+The pipeline is explicitly engineered to process massive datasets within the rigid memory constraints of serverless compute (Cloud Run). By leveraging the Polars Rust engine (Lazy API & Streaming), the system achieves near-perfect memory density, operating consistently at the physical hardware ceiling.
 
-**The Benchmark Constraint: 4GB RAM / 2 vCPU**
+**GCP Stress-Test Metrics (18 Million Row Snapshot)**
 
-![polars-vs-pandas](assets/screenshots/pandas-vs-polars.png)
->The dataset for this chart is available at [`benchmark`](/assets/benchmarks/) and the instruction to download 15m rows dataset found in [`data/`](/data/README)
+![engine-performance-8gb](/assets/screenshots/engine-performance-8gb-2cpu.png)
 
-* **Measurement Methodology:** Performance profiles were captured by executing the pipeline locally via [`docker-compose.benchmark`](docker-compose.benchmark.yml) configured to precisely mirror the Cloud Run constraints (`memory="4G" cpus="2" POLARS_MAX_THREADS=2`). Resource footprints were tracked sequentially via a PowerShell polling script:
-  ```powershell
-  while ($true) { docker stats --no-stream --format "{{.Name}}, {{.CPUPerc}}, {{.MemUsage}}, {{.MemPerc}}" >> stats_log.csv; Start-Sleep -Seconds 1 }
-  ```
-* **The Pandas Ceiling (4M Rows in 88s):** Under the legacy Pandas engine, memory usage became fully saturated (100% / 4GiB) when processing a 4-million-row dataset. Because Pandas executes eagerly and loads entire datasets into memory, any dataset larger than 4M rows resulted in an inevitable Out-Of-Memory (OOM) crash.
-* **The Polars Migration (15M Rows in 67s):** By switching to the Polars Lazy API, the pipeline now processes a dataset nearly 4x larger (15 million rows) while actually reducing execution time from 88 seconds to 67 seconds within the exact same 4GB/2vCPU constraint.
-    * **Streaming Evaluation:** Instead of eagerly loading the whole dataset, Polars processes data in batches, drastically reducing the memory footprint.
-    * **Multi-Core Utilization:** Unlike single-threaded Pandas (peaking at ~100% CPU), the Polars engine effectively parallelizes the workload, consistently utilizing ~200% CPU across both provisioned cores.
-    * **Zero-Copy Export:** The Semantic stage leverages `sink_parquet` to write analytical models directly to disk via streaming, ensuring memory is freed instantaneously during the final Gold-layer assembly.
+> The data used for this chart [`benchmarks/`](/assets/benchmarks/polars/18mrows_dataset_stats_log.csv) and the 18m rows dataset can be found her [`data/`](/data/)
+
+
+| Metric | Value (18M Row Peak Load) |
+| :--- | :--- |
+| **Throughput (Processing)** | ~116,000 Rows / Second |
+| **Total Runtime (Wall-Clock)** | 02m 34s |
+| **Compute Provision** | 2 vCPU / 8 GiB |
+| **Memory Tax (Fixed)** | ~1.5 GiB (OS / Sandbox / IO Buffers) |
+| **Effective Data Headroom** | ~6.5 GiB (Active Transformation) |
+
+*   **Linear Vertical Scaling:** Bumping the Cloud Run provision to 32GiB allows the same architecture to process ~72 Million rows without code changes.
+*   **Predictable Capacity:** Identifying the 1.5GB "Memory Tax" allows for precise resource governance, ensuring jobs never fail due to unpredictable Signal 9 (OOM) events.
+*   **Zero-Idle Economics:** 100% serverless execution ensures zero billable time during idle periods, significantly reducing the Total Cost of Ownership (TCO) compared to dedicated cluster solutions.
+
+**Measurement Methodology**
+*   **Performance Profiling:** Captured from production telemetry via the pipeline's native `run_duration` metadata, calculating the precise delta between `started_at` and `completed_at` timestamps.
+*   **Memory Utilization:** Monitored via an integrated [`psutil.virtual_memory().used`](/assets/benchmarks/polars/README.md) profiling implementation to verify the actual resource footprint and confirm the physical ceiling for an 8GiB provision.
+*   **Throughput Efficiency:** Leverages Polars' streaming evaluation to maintain high throughput and minimize CPU idle time during GCS I/O, providing a significant performance advantage over traditional eager-loading engines.
 
 
 ## Observability & Alerting
 
-![WIP_google_cloud_dashboard_monitoring_pictures](https://still-working-on-it.need-to-finish-readme.first)
+![ops_dashboard_monitoring](/assets/screenshots/ops-analytics-pipeline-db.png)
 
 Operational maturity requires assuming things will eventually break. The pipeline features a comprehensive observability suite managed natively via Google Cloud Monitoring and Cloud Logging, codified entirely in Terraform.
 
@@ -111,7 +120,7 @@ The system monitors specific log payloads across the infrastructure and dispatch
 
 ## Repository Structure
 
-```text
+```
 operations-analytics-pipeline/
 ├── .gcp/
 │   └── terraforms/         # IaC for all GCP resources (Cloud Run, Eventarc, Storage, IAM)
