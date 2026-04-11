@@ -6,6 +6,8 @@
 
 **Role:** Data Integration and Analytical Flattening.
 
+![assembled-stage-diagram](/assets/diagrams/04-assemble-stage-diagram.png)
+
 ## **System Contract**
 
 **Purpose**
@@ -46,6 +48,13 @@ The **Executor** coordinates two distinct sub-orchestrations:
 2.  **Deduplication:** Extracts the required column subset and drops duplicate primary keys.
 3.  **Export:** Persists each dimension (e.g., `df_customers`) as an independent artifact.
 
+## **Optimization & Memory Invariants**
+
+* **Primitive Integer Pipeline:** To operate within 4GB RAM, the pipeline converts 36-byte UUID strings into 8-byte `UInt64` hashes for joins, and 4-byte `UInt32` categoricals for payloads. This is the primary driver of memory efficiency for 36M+ row datasets.
+* **Streaming-First Join:** By deferring aggregations until after raw joins on `order_id`, we leverage Polars' streaming engine to avoid massive, materialized hash tables.
+* **Low-Level Memory Reclamation:** The executor utilizes `ctypes.CDLL('libc.so.6').malloc_trim(0)` at high-water mark transitions. This forces the Linux allocator to release free memory back to the OS, preventing Cloud Run from terminating the process due to bloated (but unused) heap memory.
+* **Zero-Copy Streaming:** `sink_parquet()` is used to prevent the pipeline from fully materializing the assembly result set in memory.
+
 ## **Boundaries**
 
 | This component **DOES** | This component **DOES NOT** |
@@ -66,6 +75,4 @@ The **Executor** coordinates two distinct sub-orchestrations:
 * **Export Failure:** Disk I/O errors or path resolution issues during the `export_file` call halt the lifecycle.
 
 ### **Functional Findings (Data Level)**
-* **Cardinality Explosion:** If `merge_data` detects multiple rows for a single `order_id`, it raises a `RuntimeError`. This is caught by the `task_wrapper` and treated as a fatal violation.
-* **Reference Duplication:** If a dimension table contains duplicate primary keys after extraction, it raises a `RuntimeError` which is trapped by the `task_wrapper`.
 * **Partial Payments:** Orders without payments are allowed (via Left Join); the system fills these with `None/NaN`, which is considered a valid business state rather than a failure.

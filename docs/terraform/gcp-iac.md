@@ -64,7 +64,7 @@ This project implements **Zero Trust** via Workload Identity Federation and gran
 ### 2. Permission Bindings
 | Identity | Target | Roles | Rationale |
 | :--- | :--- | :--- | :--- |
-| **Github Deployer** | Project | `run.developer`, `workflows.editor`, `cloudscheduler.admin`, `artifactregistry.admin`, `eventarc.admin`, `storage.admin`, `resourcemanager.projectIamAdmin`, `iam.workloadIdentityPoolAdmin`, `monitoring.admin`, `iam.serviceAccounts.getIamPolicy`, `iam.serviceAccountUser` | **Least Privilege:** Granular roles for managing the entire pipeline lifecycle, IAM bindings, and state management. |
+| **Github Deployer** | Project | `run.developer`, `workflows.editor`, `cloudscheduler.admin`, `artifactregistry.admin`, `eventarc.admin`, `storage.admin`, `resourcemanager.projectIamAdmin`, `iam.workloadIdentityPoolAdmin`, `monitoring.admin`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `iam.admin` | **Least Privilege:** Granular roles for managing the entire pipeline lifecycle, IAM bindings, and state management. |
 | **Drive Extractor** | Archival/Pipeline Buckets | `roles/storage.objectAdmin` | Full CRUD for data landing and archival. |
 | **Ops Pipeline** | Pipeline Bucket | `roles/storage.objectAdmin` | Read raw data and write processed artifacts. |
 | **Event Invoker** | Project | `roles/eventarc.eventReceiver` | Receive GCS notifications. |

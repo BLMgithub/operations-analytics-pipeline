@@ -23,6 +23,7 @@ locals {
     "roles/iam.workloadIdentityPoolAdmin",   # Manage WIF in wif.tf
     "roles/monitoring.admin",                # Manage Monitoring in monitoring.tf
     "roles/iam.serviceAccountAdmin",         # Manage Alert policies in monitoring.tf
+    "roles/iam.admin"                        # Manage Iam roles
   ]
 }
 

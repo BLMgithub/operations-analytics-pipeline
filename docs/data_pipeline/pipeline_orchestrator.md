@@ -4,6 +4,8 @@
 
 **Role:** End-to-End Lifecycle, Resource, and Persistence Manager.
 
+![pipeline-orchestration-diagram](/assets/diagrams/01-pipeline-orchestration-diagram.png)
+
 ## **System Contract**
 
 **Purpose**

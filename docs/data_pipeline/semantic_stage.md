@@ -7,6 +7,8 @@
 
 **Role:** Analytical Module Construction.
 
+![semantic-stage-diagram](/assets/diagrams/05-semantic-stage-diagram.png)
+
 ## **System Contract**
 
 **Purpose**
@@ -15,7 +17,6 @@ Transforms the unified Gold-layer "Order-Grain" event table into entity-centric 
 
 **Invariants**
 
-* **Lineage Integrity:** Strictly enforces that all data within a builder execution belongs to a single `run_id`. Cross-run data contamination triggers a terminal failure.
 * **Temporal Grain:** All fact tables are aggregated at the ISO-Week level, aligned deterministically to the Monday of each week (`W-MON`).
 * **Entity Grain:** 
     * **Fact Tables:** Strictly 1 row per `(Entity_ID, order_year_week)`.
@@ -46,6 +47,13 @@ The **Executor** coordinates the semantic build through a modular, registry-driv
     *   **Optimization:** Utilizes `sink_parquet` for `LazyFrame` exports, ensuring zero-copy streaming and constant memory usage.
 6.  **Memory Management:** Explicitly deletes `LazyFrames` and triggers `gc.collect()` after every individual table export (Fact and Dim) to purge intermediate memory usage.
 
+## **Optimization & Memory Invariants**
+
+* **Local Categorical Aggregation:** To optimize memory during grouping operations, builders cast high-cardinality grouping keys (e.g., `seller_id`) to `pl.Categorical` locally. This creates a temporary, localized dictionary optimized specifically for that module's aggregation plan, bypassing the need for a persistent global string cache.
+* **Narrow Aggregation Payloads:** All aggregation results (counts, sums) are immediately cast to `Int16` or `Float32` within the `agg()` block. This prevents the materialized result set from expanding in memory.
+* **Schema Hand-off:** While the building process uses `Categorical` for performance, the final output is cast back to `pl.String()` via the registry/freezing process. This ensures downstream compatibility with BI tools and prevents "dictionary leakage" between pipeline runs.
+* **Streaming Export:** `sink_parquet()` is utilized for all fact and dimension table exports, enabling zero-copy streaming of results directly from the query plan to storage.
+
 ## **Boundaries**
 
 | This component **DOES** | This component **DOES NOT** |
@@ -64,6 +72,4 @@ The **Executor** coordinates the semantic build through a modular, registry-driv
 * **Registry Mismatch:** If a builder returns a table name not defined in the `SEMANTIC_MODULES` registry, the executor raises a `RuntimeError`.
 
 ### **Functional Findings (Data Level)**
-* **Lineage Violation:** If the source data contains more than one `run_id`, the logic builders raise a `RuntimeError` to prevent multi-run pollution. This is trapped by the executor.
-* **Grain Breach:** If a builder produces duplicate rows for the defined primary grain (e.g., multiple rows for the same Seller/Week), the validation step raises a `RuntimeError`, which is trapped.
 * **Schema Violation:** If a required column defined in the registry is missing from the builder's output, the freeze step raises a `KeyError` or `RuntimeError`, which is trapped.

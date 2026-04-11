@@ -6,6 +6,8 @@
 
 **Role:** Structural Data Quality Gatekeeper.
 
+![validation-stage-diagram](/assets/diagrams/02-validation-stage-diagram.png)
+
 ## **System Contract**
 
 **Purpose** 
@@ -35,7 +37,7 @@ The **Executor** coordinates the validation lifecycle through the following dete
 2.  **Data Loading:** Attempts to load each table as a DataFrame. If a table is missing, an `error` is logged to the report.
 3.  **Base Validation:** Dispatches the DataFrame to `run_base_validations` to check for:
     * Presence of required columns.
-    * Uniqueness of Primary Keys.
+    * Uniqueness of Primary Keys and column names.
     * Compliance with non-nullable constraints.
 4.  **Role-Specific Dispatch:** If base validations pass, the executor applies specialized rules:
     * `event_fact`: Triggers `run_event_fact_validations` (temporal chronology).

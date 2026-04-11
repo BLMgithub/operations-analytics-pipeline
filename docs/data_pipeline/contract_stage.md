@@ -7,6 +7,8 @@
 
 **Role:** Structural Enforcement and Subtractive Filtering.
 
+![contract-stage-diagram](/assets/diagrams/03-contract-stage-diagram.png)
+
 ## **System Contract**
 
 **Purpose**
