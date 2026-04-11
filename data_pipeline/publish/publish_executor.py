@@ -16,26 +16,22 @@ def execute_publish_lifecycle(run_context: RunContext) -> Dict:
     """
     Main entry point for the Pipeline Publish Stage.
 
-    This component manages the transition of analytical artifacts from
-    the internal assembly zones to the production-facing BI environment.
-
     Workflow:
-        1. Integrity Gate: Verifies that the current run has produced all
-        required semantic modules and tables defined in the registry.
-        2. Promotion: Moves/copies artifacts into a permanent, read-only
-        versioned directory (v{run_id}).
-        3. Activation: Performs an atomic update of the 'latest' pointer
-        to switch BI/Reporting traffic to the new version.
+    1. Validate: Executes the 'Integrity Gate' to ensure all semantic artifacts exist and are schema-compliant.
+    2. Promote: Transfers validated artifacts to the permanent versioned publication zone.
+    3. Delegate: Triggers the atomic pointer swap to activate the new version for BI consumers.
 
     Operational Guarantees:
-    - Atomicity: The 'latest' pointer is updated ONLY if all prior
-      validation and promotion steps succeed.
-    - Immutability: Promoted versions are treated as static snapshots.
-    - Fail-Fast: Any failure in the lifecycle prevents version activation.
+    - Atomicity: The 'latest' version pointer is updated ONLY after successful promotion of all artifacts.
+    - Immutability: Once published, a versioned directory is treated as a static, read-only snapshot.
+    - Fail-Fast: Any failure in validation or promotion immediately halts the lifecycle.
+
+    Side Effects:
+    - Persists a new versioned directory (v{run_id}) in the publication zone.
+    - Mutates the 'latest_version.json' manifest to update the global version pointer.
 
     Failure Behavior:
-    - Explicit Fail-Fast: Uses 'fail_step' helper to terminate the lifecycle and
-      mark status as 'failed' immediately after any step failure.
+    - Traps step-level failures; logs errors and returns a report with status='failed', preventing version activation.
 
     Returns:
         Dict: A global publish report containing status and step-level logs.

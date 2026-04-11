@@ -46,15 +46,18 @@ def run_integrity_gate(run_context: RunContext) -> Dict:
     Enforces the pre-publication structural completeness contract.
 
     Contract:
-    - Scans the runtime semantic directory for existence.
-    - Validates that every Module and Table defined in SEMANTIC_MODULES
-      exists as a physical artifact.
+    - Structural Validation: Scans the runtime semantic directory and verifies 1:1 parity with SEMANTIC_MODULES registry.
+    - Schema Enforcement: Validates that all physical Parquet files contain the required column set.
 
     Invariants:
-    - Failure is triggered if any expected Parquet file is missing.
+    - Completeness: Halts publication if any expected module or table is missing from the file system.
+    - Version Alignment: Ensures all files follow the current run_id timestamp convention.
 
-    Returns:
-        Dict: A report object containing the success status and findings.
+    Outputs:
+    - Dict: Report containing 'status' and detailed findings.
+
+    Failures:
+    - [Structural] Returns status='failed' if directories are missing, modules mismatch, or schemas are incomplete.
     """
 
     report = init_report()
@@ -129,15 +132,18 @@ def promote_semantic_version(run_context: RunContext) -> Dict:
     Manages the archival of the current run into the publication zone.
 
     Contract:
-    - Creates a permanent directory following the 'v{run_id}' convention.
-    - Transfers all semantic artifacts to the versioned destination.
+    - Promote: Transfers validated semantic artifacts from the runtime zone to a permanent versioned destination.
+    - Versioning: Creates a new directory following the 'v{run_id}' physical convention.
 
     Invariants:
-    - Destination is derived from run_context.published_path.
-    - Relies on the storage_adapter for Local/GCS transparency.
+    - Immutability: Once promoted, artifacts are treated as static, read-only snapshots.
+    - Path Integrity: Destination is derived strictly from run_context.published_path.
 
-    Returns:
-        Dict: A report object logging the promotion status.
+    Outputs:
+    - Dict: Report logging the promotion status and any transfer errors.
+
+    Failures:
+    - [Operational] Returns status='failed' if the version directory already exists or upload fails.
     """
 
     report = init_report()
@@ -172,16 +178,18 @@ def activate_published_version(run_context: RunContext) -> Dict:
     Atomically updates the system-wide 'latest' version pointer.
 
     Contract:
-    - Generates a JSON manifest containing run_id and publication metadata.
-    - Overwrites the root 'latest_version.json' in the published zone.
+    - Atomic Update: Overwrites the root 'latest_version.json' to shift downstream consumers to the new run.
+    - BI Consistency: Guarantees that analytical tools see the new version only after successful promotion.
 
     Invariants:
-    - Atomic Update: Local updates use write-and-replace to prevent corruption.
-    - BI Consistency: Downstream consumers see the new version only after
-      this atomic swap is complete.
+    - Pointer Integrity: Manifest always contains current run_id and ISO-8601 publication timestamps.
+    - Atomicity: Local updates use a write-and-replace (os.replace) strategy to prevent manifest corruption.
 
-    Returns:
-        Dict: A report object logging the activation status.
+    Outputs:
+    - Dict: Report logging the activation status.
+
+    Failures:
+    - [Operational] Returns status='failed' if manifest generation or storage upload (Local/GCS) fails.
     """
 
     report = init_report()

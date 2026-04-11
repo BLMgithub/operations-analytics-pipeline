@@ -23,24 +23,19 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
     """
     Main entry point for the Pipeline Validation Stage.
 
-    This component serves as the primary diagnostic gate for the data pipeline,
-    ensuring that raw snapshots meet the structural requirements for the
-    subsequent Contract and Assembly stages.
-
     Workflow:
-        1. Loading: Iteratively fetches logical tables from the snapshot zone.
-        2. Base Check: Enforces schema, uniqueness, and null constraints via 'run_base_validations'.
-        3. Role Dispatch: Executes specialized logic (Event/Transaction) based on 'TABLE_CONFIG'.
-        4. Referential Check: Evaluates inter-table integrity (orphans) via 'run_cross_table_validations'.
+    1. Hydrate: Iteratively fetches logical tables from the snapshot zone.
+    2. Delegate: Enforces base structural integrity (Schema, PK, Nulls) for each table.
+    3. Delegate: Executes role-specific domain checks (Event Chronology, Transaction Ranges).
+    4. Delegate: Performs cross-table referential analysis (Orphan Detection).
 
     Operational Guarantees:
-    - Diagnostic Only: This function is read-only and will never mutate the source data.
-    - Comprehensive Reporting: Captures all failures across all tables before returning; does not fail-fast on the first table error.
-    - Severity: Structural issues are logged as 'errors' while referential issues are 'warnings'.
+    - Diagnostic Only: Read-only; never mutates source snapshots.
+    - Non-Blocking: Processes all tables regardless of individual base validation failures.
+    - Severity Model: Distinguishes between fatal Structural Errors and non-fatal Referential Warnings.
 
     Failure Behavior:
-    - Non-Blocking: Continues processing remaining tables even if one fails base validations.
-    - Status Update: Sets global report status to 'failed' if any errors or warnings are accumulated.
+    - Sets the global report status to 'failed' if any errors or warnings are accumulated across the dataset.
 
     Returns:
         Dict: A unified validation report containing 'status' and detailed finding lists.

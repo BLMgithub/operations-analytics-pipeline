@@ -56,13 +56,17 @@ def run_base_validations(
 
     Contract:
     - Mandatory Schema: All 'required_column' names must exist in the DataFrame.
-    - Uniqueness: Values in 'primary_key' columns must be unique, and column names must also be unique. 
+    - Uniqueness: Enforces primary key uniqueness and detects conflicting duplicates.
     - Non-Nullability: Columns in 'non_nullable_column' must not contain NaN values.
-    - Presence: The table must contain at least one row.
+
+    Invariants:
+    - Diagnostic Safety: Read-only; does not mutate the input DataFrame.
+
+    Outputs:
+    - Boolean: True if all mandatory structural checks pass.
 
     Failures:
-    - Logs findings to 'report["errors"]'.
-    - Returns False if any mandatory check fails, signaling that the table is unusable.
+    - [Structural] Logs findings to 'report["errors"]' and returns False for missing columns, empty datasets, or PK conflicts.
     """
 
     if df.empty:
@@ -156,13 +160,17 @@ def run_event_fact_validations(
     Enforces business-logic chronology for Event-Role tables.
 
     Contract:
-    - Evaluates temporal sequence: Purchase <= Approval <= Delivery.
-    - Validates that timestamps are logically situated in the past.
+    - Chronological Check: Evaluates temporal sequence (Purchase <= Approval <= Delivery).
+    - Parseability: Validates timestamp string compatibility with system formats.
+
+    Invariants:
+    - Temporal Consistency: Flags records where delivery precedes purchase as Warnings.
+
+    Outputs:
+    - Boolean: True if all temporal checks are executed.
 
     Failures:
-    - Logs violations to 'report["warnings"]'. These are non-fatal to the stage
-      but indicate data quality degradation.
-    - Logs 'report["errors"]' if required timestamp columns are missing.
+    - [Structural] Returns False if required timestamp columns are missing.
     """
 
     missing_ts_columns = [col for col in REQUIRED_TIMESTAMPS if col not in df.columns]
@@ -220,11 +228,13 @@ def run_transaction_detail_validations(
     Enforces domain and range constraints for Transaction-Role tables.
 
     Contract:
-    - Values: Ensures 'price' and 'freight_value' are non-negative.
-    - Payments: Ensures 'payment_installments' and 'payment_value' are >= 0.
+    - Range Check: Ensures financial metrics (price, freight, payments) are non-negative.
+
+    Outputs:
+    - Boolean: True if domain validations complete.
 
     Failures:
-    - Logs out-of-range values to 'report["errors"]'.
+    - [Operational] Logs out-of-range values to 'report["errors"]'.
     """
 
     numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
@@ -247,16 +257,16 @@ def run_cross_table_validations(
     Enforces referential integrity (Foreign Key) across the dataset.
 
     Contract:
-    - Orphan Detection: Ensures all Order Items and Payments have a valid parent
-      in the 'orders' table.
-    - Set Theory: Uses 'order_id' set intersection to identify disconnected children.
+    - Orphan Detection: Identifies child records (Items, Payments) lacking a valid parent Order.
 
     Invariants:
-    - Skip-Safe: If 'df_orders' is missing from the input dict, the check is skipped
-      and logged as 'info'.
+    - Referential Grain: Uses 'order_id' as the primary join key for set intersection.
+
+    Outputs:
+    - Boolean: True if cross-table analysis completes.
 
     Failures:
-    - Logs orphan counts to 'report["warnings"]'.
+    - [Operational] Logs orphan counts as Warnings to the report.
     """
 
     required_tables = ["df_orders", "df_order_items", "df_payments"]

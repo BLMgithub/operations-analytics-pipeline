@@ -17,27 +17,24 @@ def apply_contract(
     """
     Main entry point for the Raw-to-Contracted Stage.
 
-    This component enforces structural data quality gates based on the logical
-    role of the table. It acts as a subtractive filter and schema-freezer,
-    ensuring only compliant rows and columns reach the Silver (contracted) layer.
-
     Workflow:
-        1. Resolve: Determines table configuration and role (event_fact, entity_reference, etc.).
-        2. Load: Fetches the raw snapshot from the lake's snapshot zone.
-        3. Sequence: Iteratively applies atomic filtering rules (Deduplication, Null-checks, etc.).
-        4. Track: Captures row-level telemetry and identifies compromised 'order_id's.
-        5. Propagate: Returns validated/invalidated IDs to maintain referential integrity.
-        6. Freeze: Executes 'enforce_schema' as the terminal step to project approved columns.
-        7. Export: Persists the contract-compliant dataset to the Silver zone.
+    1. Resolve: Identifies table metadata (role, schema, keys) from the central registry.
+    2. Hydrate: Fetches the raw snapshot from the lake's snapshot zone.
+    3. Delegate: Iteratively applies atomic logic rules (Deduplication, Chronology, Null-checks).
+    4. Validate: Executes 'enforce_schema' as the terminal structural gate.
+    5. Promote: Persists the contract-compliant dataset to the Silver (contracted) zone.
 
     Operational Guarantees:
-    - Subtractive Only: Filters rows first; never mutates row values (only column types).
-    - Finality: The 'enforce_schema' step guarantees the artifact matches the system registry.
-    - Referential Integrity: Tables processed after 'df_orders' use its output for parent-check filtering.
+    - Subtractive Only: Exclusively filters rows or casts types; never mutates business values.
+    - Referential Safety: Propagates invalidated keys across table boundaries to ensure consistent pruning.
+    - Structural Finality: Guarantees output parity with the ASSEMBLE_SCHEMA specification.
+
+    Side Effects:
+    - Persists a Parquet artifact to the contracted directory.
+    - Updates newly invalidated 'order_id' sets for downstream cross-table pruning.
 
     Failure Behavior:
-    - Traps logic-step exceptions via a try-except block within the ROLE_STEPS loop.
-    - Marks stage status as 'failed' and returns early upon encountering any transformation error.
+    - Traps logic-step exceptions; logs errors to the report and halts the current table's processing.
 
     Returns:
         tuple: (Stage Report Dict, Newly Invalidated IDs Set, Validated Order IDs Set)
