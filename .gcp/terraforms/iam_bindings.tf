@@ -12,18 +12,20 @@ resource "google_service_account_iam_member" "github_deployer_sa" {
 # Roles for github-actions-deployer
 locals {
   deployer_roles = [
-    "roles/run.developer",
-    "roles/workflows.editor",
-    "roles/cloudscheduler.admin",
-    "roles/iam.serviceAccountUser"
+    "roles/run.developer",                   # Manage Cloud Run jobs
+    "roles/workflows.editor",                # Manage Workflows
+    "roles/cloudscheduler.admin",            # Manage Scheduler
+    "roles/iam.serviceAccountUser",          # Act as SAs for jobs
+    "roles/artifactregistry.admin",          # Manage Artifact Registry
+    "roles/eventarc.admin",                  # Manage Eventarc triggers
+    "roles/storage.admin",                   # Manage buckets and state locking
+    "roles/resourcemanager.projectIamAdmin", # Manage the IAM bindings in this code
+    "roles/iam.workloadIdentityPoolAdmin",   # Manage WIF in wif.tf
+    "roles/monitoring.admin",                # Manage Monitoring in monitoring.tf
+    "roles/iam.serviceAccountAdmin",         # Manage Alert policies in monitoring.tf
   ]
 }
 
-# Enables to:
-# Deploy Cloud Run containers
-# Deploy pipeline-dispatcher.yml
-# Update the cron job
-# Attach SAs to Cloud Run
 resource "google_project_iam_member" "github_deployer_permissions" {
   for_each = toset(local.deployer_roles)
   project  = var.project_id
