@@ -22,6 +22,7 @@ locals {
     "roles/resourcemanager.projectIamAdmin", # Manage the IAM bindings in this code
     "roles/iam.workloadIdentityPoolAdmin",   # Manage WIF in wif.tf
     "roles/monitoring.admin",                # Manage Monitoring in monitoring.tf
+    "roles/logging.configWriter",            # Required for log-based alert policies
     "roles/iam.serviceAccountAdmin",         # Manage Alert policies in monitoring.tf
     "roles/iam.admin"                        # Manage Iam roles
   ]
