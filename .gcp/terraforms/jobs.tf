@@ -24,6 +24,10 @@ resource "google_cloud_run_v2_job" "pipeline" {
           name  = "POLARS_MAX_THREADS"
           value = "2"
         }
+        env {
+          name  = "GCP_REGION"
+          value = var.region
+        }
       }
     }
   }

@@ -9,6 +9,7 @@ The pipeline follows a **Trigger-Action-Archive** flow:
 3.  **Dispatch:** An Eventarc trigger detects the new file and invokes a Google Workflow (`pipeline-dispatcher`).
 4.  **Processing:** The Workflow triggers the main `operations-pipeline` Cloud Run job (2 vCPU, 8Gi RAM) for heavy-duty data processing.
 5.  **Transient Storage:** Intermediate files are stored in the **Pipeline Bucket** with a 7-day TTL on raw data to minimize costs and exposure.
+6.  **Serving Layer:** The final semantic models are published as **BigQuery External Tables** and presented via stable **Authorized Views** for Power BI and dashboard consumers.
 
 ## Prerequisites
 *   **Terraform:** Version `~> 1.5.0`
@@ -38,10 +39,13 @@ The initial infrastructure provisioning must be executed by a maintainer with `P
 | `ops-repo` | Artifact Registry | n/a | n/a | Docker repository for pipeline images. |
 
 ### 2. Storage & Lifecycle (`storage.tf`)
-| Bucket Name | Storage Class | Lifecycle Policy |
+| Resource Name | Type | Policy / Details |
 | :--- | :--- | :--- |
-| `ops-archival-storage` | Standard -> Coldline | Move to Coldline after 400 days; Delete after 3 years. |
-| `ops-pipeline-storage` | Standard | Delete files with prefix `raw/` after 7 days. |
+| `ops-archival-storage` | GCS Bucket | Move to Coldline after 400 days; Delete after 3 years. |
+| `ops-pipeline-storage` | GCS Bucket | Delete files with prefix `raw/` after 7 days. |
+| `seller_semantic` | BQ Dataset | Logical container for Seller fact/dim views. |
+| `customer_semantic` | BQ Dataset | Logical container for Customer fact/dim views. |
+| `product_semantic` | BQ Dataset | Logical container for Product fact/dim views. |
 
 ### 3. Orchestration (`orchestration.tf`)
 *   **Cloud Scheduler:** `0 0 * * *` (Daily 12AM PHT) triggers the Extractor.
@@ -64,9 +68,10 @@ This project implements **Zero Trust** via Workload Identity Federation and gran
 ### 2. Permission Bindings
 | Identity | Target | Roles | Rationale |
 | :--- | :--- | :--- | :--- |
-| **Github Deployer** | Project | `run.developer`, `workflows.editor`, `cloudscheduler.admin`, `artifactregistry.admin`, `eventarc.admin`, `storage.admin`, `resourcemanager.projectIamAdmin`, `iam.workloadIdentityPoolAdmin`, `monitoring.admin`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `iam.admin` | **Least Privilege:** Granular roles for managing the entire pipeline lifecycle, IAM bindings, and state management. |
+| **Github Deployer** | Project | `run.developer`, `workflows.editor`, `cloudscheduler.admin`, `artifactregistry.admin`, `eventarc.admin`, `storage.admin`, `resourcemanager.projectIamAdmin`, `iam.workloadIdentityPoolAdmin`, `monitoring.admin`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `iam.admin`, `logging.configWriter`, `bigquery.admin`| **Least Privilege:** Granular roles for managing the entire pipeline lifecycle, IAM bindings, state management, and BigQuery schemas. |
 | **Drive Extractor** | Archival/Pipeline Buckets | `roles/storage.objectAdmin` | Full CRUD for data landing and archival. |
 | **Ops Pipeline** | Pipeline Bucket | `roles/storage.objectAdmin` | Read raw data and write processed artifacts. |
+| | Project | `roles/bigquery.dataEditor`, `roles/bigquery.jobUser` | Permission to create External Tables, swap Authorized Views, and execute queries. |
 | **Event Invoker** | Project | `roles/eventarc.eventReceiver` | Receive GCS notifications. |
 | | Project | `roles/workflows.invoker` | Permission to start workflow execution. |
 

@@ -24,7 +24,8 @@ locals {
     "roles/monitoring.admin",                # Manage Monitoring in monitoring.tf
     "roles/logging.configWriter",            # Required for log-based alert policies
     "roles/iam.serviceAccountAdmin",         # Manage Alert policies in monitoring.tf
-    "roles/iam.admin"                        # Manage Iam roles
+    "roles/iam.admin",                       # Manage Iam roles
+    "roles/bigquery.admin"                   # Manage BigQuery datasets and views
   ]
 }
 
@@ -72,6 +73,21 @@ resource "google_storage_bucket_iam_member" "pipeline_runner_pipeline_access" {
   bucket = google_storage_bucket.ops_pipeline_bucket.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.platform_accounts["ops-pipeline-sa"].email}"
+}
+
+# Pipeline Runner BigQuery Access
+locals {
+  pipeline_bq_roles = [
+    "roles/bigquery.dataEditor",
+    "roles/bigquery.jobUser"
+  ]
+}
+
+resource "google_project_iam_member" "pipeline_runner_bq_access" {
+  for_each = toset(local.pipeline_bq_roles)
+  project  = var.project_id
+  role     = each.key
+  member   = "serviceAccount:${google_service_account.platform_accounts["ops-pipeline-sa"].email}"
 }
 
 

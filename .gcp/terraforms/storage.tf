@@ -46,3 +46,19 @@ resource "google_storage_bucket" "ops_pipeline_bucket" {
     }
   }
 }
+
+# BigQuery Semantic Datasets
+locals {
+  semantic_datasets = [
+    "seller_semantic",
+    "customer_semantic",
+    "product_semantic"
+  ]
+}
+
+resource "google_bigquery_dataset" "semantic_datasets" {
+  for_each                   = toset(local.semantic_datasets)
+  dataset_id                 = each.key
+  location                   = var.region
+  delete_contents_on_destroy = false
+}
