@@ -6,6 +6,8 @@ from data_pipeline.shared.run_context import RunContext
 from data_pipeline.shared.loader_exporter import load_single_delta, export_file
 from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.contract.registry import ROLE_STEPS
+from data_pipeline.contract.id_registrar import id_mapping, ID_COLUMNS_TO_MAP
+from pathlib import Path
 
 
 def apply_contract(
@@ -77,7 +79,6 @@ def apply_contract(
     dtypes = config.get("dtypes", {})
 
     df, filename = load_single_delta(base_path=base_path, table_name=table_name)
-
     if df is None:
         report["status"] = "failed"
         report["errors"].append("Failed to load logical table")
@@ -126,7 +127,15 @@ def apply_contract(
     report["final_rows"] = len(df)
 
     if table_name == "df_orders":
-        valid_ids = set(df["order_id"])
+        valid_ids = set(df.get_column("order_id"))
+
+    df = id_mapping(
+        df=df,
+        table_name=table_name,
+        mapping_dict=ID_COLUMNS_TO_MAP,
+        source=run_context.contracted_path / "id_mapping",
+        destination=Path(run_context.storage_mapping_path),
+    )
 
     output_path = run_context.contracted_path / f"{filename}.parquet"
 

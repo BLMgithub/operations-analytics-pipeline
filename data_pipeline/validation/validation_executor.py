@@ -3,7 +3,7 @@
 # =============================================================================
 
 from typing import Dict
-import pandas as pd
+import polars as pl
 from pathlib import Path
 from data_pipeline.shared.loader_exporter import load_single_delta
 from data_pipeline.shared.table_configs import TABLE_CONFIG
@@ -46,7 +46,7 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
 
     report = init_report()
 
-    tables: Dict[str, pd.DataFrame] = {}
+    tables: Dict[str, pl.DataFrame] = {}
     loaded_table_names = set()
 
     # Get assigned table configs
@@ -66,12 +66,12 @@ def apply_validation(run_context: RunContext, base_path: Path | None = None) -> 
         tables[table_name] = df
 
         if not run_base_validations(
-            df,
-            table_name,
-            config["primary_key"],
-            config["required_column"],
-            config["non_nullable_column"],
-            report,
+            df=df,
+            table_name=table_name,
+            primary_key=config["primary_key"],
+            required_column=config["required_column"],
+            non_nullable_column=config["non_nullable_column"],
+            report=report,
         ):
             continue
 

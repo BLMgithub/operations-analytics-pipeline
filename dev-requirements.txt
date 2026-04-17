@@ -8,11 +8,13 @@ pyparsing<3.0.0
 tzdata
 
 # pipeline
-pandas==2.1.4
 polars==1.39.0
-pytest==9.0.2
 pyarrow==19.0.0
+google-cloud-storage
+google-cloud-bigquery>=3.0.0
+
+# dev & testing
+pytest==9.0.2
+pytest-cov
 black==24.3.0
 ruff==0.0.264
-google-cloud-storage
-pytest-cov

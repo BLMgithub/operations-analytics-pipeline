@@ -2,13 +2,17 @@
 # Contract Stage logic
 # =============================================================================
 
-
-import pandas as pd
+import polars as pl
 from typing import List
 from data_pipeline.shared.table_configs import REQUIRED_TIMESTAMPS, TIMESTAMP_FORMATS
 
 
-def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+# ------------------------------------------------------------
+# CONTRACT LOGICS
+# ------------------------------------------------------------
+
+
+def deduplicate_exact_events(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
     """
     Enforces record-level uniqueness across the entire row schema.
 
@@ -23,24 +27,22 @@ def deduplicate_exact_events(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     - Tuple: (Filtered DataFrame, Integer count of dropped rows).
 
     Failures:
-    - [Structural] Crashes if input is not a pandas DataFrame.
+    - [Structural] Crashes if input is not a polars DataFrame.
     """
 
-    initial_count = len(df)
-    duplicated_mask = df.duplicated()
+    initial_count = df.height
+    duplicated_mask = df.is_duplicated()
+    removed_count = 0
 
     if duplicated_mask.any():
 
-        df = df.drop_duplicates()
-        removed_count = initial_count - len(df)
-
-    else:
-        removed_count = 0
+        df = df.unique()
+        removed_count = initial_count - df.height
 
     return df, removed_count
 
 
-def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, set]:
+def remove_unparsable_timestamps(df: pl.DataFrame) -> tuple[pl.DataFrame, int, set]:
     """
     Enforces parseability for system-critical temporal fields.
 
@@ -59,34 +61,33 @@ def remove_unparsable_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
     - [Structural] Crashes if REQUIRED_TIMESTAMPS columns are missing from the DataFrame.
     """
 
-    initial_count = len(df)
-    unparsable_mask = pd.Series(False, index=df.index)
-
-    for col in REQUIRED_TIMESTAMPS:
-        ts = pd.to_datetime(
-            df[col],
-            format=TIMESTAMP_FORMATS[col],
-            errors="coerce",
-        )
-
-        # accumulate True for every NaT
-        unparsable_mask |= ts.isna()
-
+    initial_count = df.height
     invalid_order_ids = set()
+    remove_count = 0
+
+    # Ensure timestamps are parsed for validation if they are still strings
+    # normalize_datetimes handles resolution, but string-to-datetime happens here if needed
+    exprs = []
+    for col in REQUIRED_TIMESTAMPS:
+        if col in df.columns:
+            if df.schema[col] == pl.String:
+                fmt = TIMESTAMP_FORMATS.get(col)
+                exprs.append(pl.col(col).str.to_datetime(format=fmt, strict=False).is_null())
+            else:
+                exprs.append(pl.col(col).is_null())
+
+    unparsable_mask = df.select(pl.any_horizontal(exprs)).to_series()
+
     if unparsable_mask.any():
 
-        invalid_order_ids = set(df.loc[unparsable_mask, "order_id"])
-
-        df = df[~unparsable_mask]
-        remove_count = initial_count - len(df)
-
-    else:
-        remove_count = 0
+        invalid_order_ids = set(df.filter(unparsable_mask).get_column("order_id"))
+        df = df.filter(~unparsable_mask)
+        remove_count = initial_count - df.height
 
     return df, remove_count, invalid_order_ids
 
 
-def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, set]:
+def remove_impossible_timestamps(df: pl.DataFrame) -> tuple[pl.DataFrame, int, set]:
     """
     Enforces logical chronology for the order lifecycle.
 
@@ -104,30 +105,30 @@ def remove_impossible_timestamps(df: pd.DataFrame) -> tuple[pd.DataFrame, int, s
     - [Structural] Crashes if lifecycle timestamp columns are missing.
     """
 
-    purchase_ts = pd.to_datetime(df["order_purchase_timestamp"])
-    approved_ts = pd.to_datetime(df["order_approved_at"])
-    delivered_ts = pd.to_datetime(df["order_delivered_timestamp"])
-
-    invalid_mask = (approved_ts < purchase_ts) | (delivered_ts < purchase_ts)
-    initial_count = len(df)
-
+    initial_count = df.height
     invalid_order_ids = set()
+    remove_count = 0
+
+    # At this point, timestamps should already be Datetime types due to prior steps or loader normalization
+    invalid_mask = df.select(
+        violation=(
+            (pl.col("order_approved_at") < pl.col("order_purchase_timestamp"))
+            | (pl.col("order_delivered_timestamp") < pl.col("order_purchase_timestamp"))
+        ).fill_null(False)
+    ).get_column("violation")
+
     if invalid_mask.any():
+        invalid_order_ids = set(df.filter(invalid_mask).get_column("order_id"))
 
-        invalid_order_ids = set(df.loc[invalid_mask, "order_id"])
-
-        df = df[~invalid_mask]
-        remove_count = initial_count - len(df)
-
-    else:
-        remove_count = 0
+        df = df.filter(~invalid_mask)
+        remove_count = initial_count - df.height
 
     return df, remove_count, invalid_order_ids
 
 
 def remove_rows_with_null_constraint(
-    df: pd.DataFrame, non_nullable_column: List[str]
-) -> tuple[pd.DataFrame, int, set]:
+    df: pl.DataFrame, non_nullable_column: List[str]
+) -> tuple[pl.DataFrame, int, set]:
     """
     Enforces mandatory data presence (NOT NULL) for a dynamic column list.
 
@@ -145,27 +146,27 @@ def remove_rows_with_null_constraint(
     - [Structural] Crashes if 'non_nullable_column' names are not in the DataFrame.
     """
 
-    initial_count = len(df)
+    initial_count = df.height
     invalid_ids = set()
+    removed_count = 0
 
-    column_nulls = df[non_nullable_column].isna().any(axis=1)
+    column_nulls = df.select(
+        pl.any_horizontal([pl.col(col).is_null() for col in non_nullable_column])
+    ).to_series()
 
     if column_nulls.any():
         if "order_id" in df.columns:
-            invalid_ids = set(df.loc[column_nulls, "order_id"])
+            invalid_ids = set(df.filter(column_nulls).get_column("order_id"))
 
-        df = df[~column_nulls]
-        removed_count = initial_count - len(df)
-
-    else:
-        removed_count = 0
+        df = df.filter(~column_nulls)
+        removed_count = initial_count - df.height
 
     return df, removed_count, invalid_ids
 
 
 def cascade_drop_by_order_id(
-    df: pd.DataFrame, invalid_order_ids: set
-) -> tuple[pd.DataFrame, int]:
+    df: pl.DataFrame, invalid_order_ids: set
+) -> tuple[pl.DataFrame, int]:
     """
     Enforces referential cleanup based on a blacklist of compromised keys.
 
@@ -183,17 +184,18 @@ def cascade_drop_by_order_id(
     - [Structural] Crashes if 'order_id' column is missing.
     """
 
-    initial_count = len(df)
+    initial_count = df.height
+    removed_count = 0
 
-    df = df[~df["order_id"].isin(invalid_order_ids)]
-    removed = initial_count - len(df)
+    df = df.filter(~pl.col("order_id").is_in(invalid_order_ids))
+    removed_count = initial_count - df.height
 
-    return df, removed
+    return df, removed_count
 
 
 def enforce_parent_reference(
-    df: pd.DataFrame, valid_order_ids: set
-) -> tuple[pd.DataFrame, int]:
+    df: pl.DataFrame, valid_order_ids: set
+) -> tuple[pl.DataFrame, int]:
     """
     Enforces referential integrity based on a whitelist of validated keys.
 
@@ -205,25 +207,27 @@ def enforce_parent_reference(
     - Data Reliability: Guarantees that every child record has a corresponding valid parent.
 
     Outputs:
-    - Tuple: (Filtered DataFrame, Integer count of dropped rows).
+    - Tuple: (Filtered DataFrame, Count of dropped rows, Set of invalid order_ids).
 
     Failures:
     - [Structural] Crashes if 'order_id' column is missing.
     """
-    initial_count = len(df)
+
+    initial_count = df.height
+    removed_count = 0
 
     if not valid_order_ids:
-        return df, 0
+        return df, removed_count
 
-    df = df[df["order_id"].isin(valid_order_ids)]
-    removed = initial_count - len(df)
+    df = df.filter(pl.col("order_id").is_in(valid_order_ids))
+    removed_count = initial_count - df.height
 
-    return df, removed
+    return df, removed_count
 
 
 def enforce_schema(
-    df: pd.DataFrame, required_column: List[str], dtypes: dict
-) -> tuple[pd.DataFrame, int]:
+    df: pl.DataFrame, required_column: List[str], dtypes: dict
+) -> tuple[pl.DataFrame, int]:
     """
     Finalizes the structural contract via schema projection and type casting.
 
@@ -242,11 +246,30 @@ def enforce_schema(
     - [Structural] Crashes if required columns are missing or if dtypes are incompatible.
     """
 
-    initial_col_count = len(df.columns)
+    initial_col_count = df.width
 
-    df = df[required_column]
-    df = df.astype(dtypes)
+    valid_cols = [col for col in required_column if col in df.columns]
 
-    removed = initial_col_count - len(df.columns)
+    exprs = []
+    for col in valid_cols:
+        target_dtype = dtypes.get(col)
 
-    return df, removed
+        # Datetimes are already normalized for resolution by the loader
+        # We just need to ensure string-to-datetime parsing here
+        if target_dtype == pl.Datetime:
+            if df.schema[col] == pl.String:
+                fmt = TIMESTAMP_FORMATS.get(col)
+                exprs.append(pl.col(col).str.to_datetime(format=fmt, strict=False))
+            else:
+                exprs.append(pl.col(col))
+        
+        # Standard Cast
+        elif target_dtype:
+            exprs.append(pl.col(col).cast(target_dtype))
+        else:
+            exprs.append(pl.col(col))
+
+    df = df.select(exprs)
+    removed_count = initial_col_count - df.width
+
+    return df, removed_count
