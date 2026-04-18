@@ -65,14 +65,14 @@ def remove_unparsable_timestamps(df: pl.DataFrame) -> tuple[pl.DataFrame, int, s
     invalid_order_ids = set()
     remove_count = 0
 
-    # Ensure timestamps are parsed for validation if they are still strings
-    # normalize_datetimes handles resolution, but string-to-datetime happens here if needed
     exprs = []
     for col in REQUIRED_TIMESTAMPS:
         if col in df.columns:
             if df.schema[col] == pl.String:
                 fmt = TIMESTAMP_FORMATS.get(col)
-                exprs.append(pl.col(col).str.to_datetime(format=fmt, strict=False).is_null())
+                exprs.append(
+                    pl.col(col).str.to_datetime(format=fmt, strict=False).is_null()
+                )
             else:
                 exprs.append(pl.col(col).is_null())
 
@@ -110,7 +110,6 @@ def remove_impossible_timestamps(df: pl.DataFrame) -> tuple[pl.DataFrame, int, s
     invalid_order_ids = set()
     remove_count = 0
 
-    # At this point, timestamps should already be Datetime types due to prior steps or loader normalization
     invalid_mask = df.select(
         violation=(
             (pl.col("order_approved_at") < pl.col("order_purchase_timestamp"))
@@ -255,16 +254,13 @@ def enforce_schema(
     for col in valid_cols:
         target_dtype = dtypes.get(col)
 
-        # Datetimes are already normalized for resolution by the loader
-        # We just need to ensure string-to-datetime parsing here
         if target_dtype == pl.Datetime:
             if df.schema[col] == pl.String:
                 fmt = TIMESTAMP_FORMATS.get(col)
                 exprs.append(pl.col(col).str.to_datetime(format=fmt, strict=False))
             else:
                 exprs.append(pl.col(col))
-        
-        # Standard Cast
+
         elif target_dtype:
             exprs.append(pl.col(col).cast(target_dtype))
         else:

@@ -129,12 +129,15 @@ def apply_contract(
     if table_name == "df_orders":
         valid_ids = set(df.get_column("order_id"))
 
+    temp_path = run_context.contracted_path / "id_mapping"
+    storage_mapping = Path(run_context.storage_mapping_path)
+
     df = id_mapping(
         df=df,
         table_name=table_name,
         mapping_dict=ID_COLUMNS_TO_MAP,
-        source=run_context.contracted_path / "id_mapping",
-        destination=Path(run_context.storage_mapping_path),
+        runtime_dir=temp_path,
+        destination=storage_mapping,
     )
 
     output_path = run_context.contracted_path / f"{filename}.parquet"
