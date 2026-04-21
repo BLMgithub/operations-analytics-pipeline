@@ -15,6 +15,7 @@ from data_pipeline.contract.contract_logic import (
     enforce_parent_reference,
     enforce_schema,
 )
+from data_pipeline.contract.id_registrar import map_uuid_to_int, id_mapping
 
 # ------------------------------------------------------------
 # FIXTURES
@@ -157,6 +158,64 @@ def test_enforce_schema():
 
 
 # ------------------------------------------------------------
+# ID REGISTRAR UNIT TESTS
+# ------------------------------------------------------------
+
+
+def test_map_uuid_to_int_new_file(tmp_path):
+    df = pl.DataFrame({"user_id": ["u1", "u2", "u3"]})
+    mapping_file = tmp_path / "user_id_mapping.parquet"
+
+    map_uuid_to_int(df, mapping_file, "user_id")
+
+    assert mapping_file.exists()
+    mapping_df = pl.read_parquet(mapping_file)
+    assert mapping_df.height == 3
+    assert "user_id" in mapping_df.columns
+    assert "user_id_int" in mapping_df.columns
+    assert mapping_df["user_id_int"].to_list() == [1, 2, 3]
+    assert mapping_df["user_id_int"].dtype == pl.UInt32
+
+
+def test_map_uuid_to_int_update_existing(tmp_path):
+    mapping_file = tmp_path / "user_id_mapping.parquet"
+    initial_df = pl.DataFrame({"user_id": ["u1", "u2"], "user_id_int": [1, 2]}).cast(
+        {"user_id_int": pl.UInt32}
+    )
+    initial_df.write_parquet(mapping_file)
+
+    new_df = pl.DataFrame({"user_id": ["u2", "u3", "u4"]})
+    map_uuid_to_int(new_df, mapping_file, "user_id")
+
+    mapping_df = pl.read_parquet(mapping_file).sort("user_id_int")
+    assert mapping_df.height == 4
+    assert set(mapping_df["user_id"].to_list()) == {"u1", "u2", "u3", "u4"}
+    assert mapping_df["user_id_int"].to_list() == [1, 2, 3, 4]
+
+
+def test_id_mapping_orchestration(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    destination = tmp_path / "destination"
+    runtime_dir.mkdir()
+    destination.mkdir()
+
+    df = pl.DataFrame({"order_id": ["o1", "o2"], "customer_id": ["c1", "c2"]})
+
+    mapping_dict = {"df_orders": ["order_id", "customer_id"]}
+
+    lf_mapped = id_mapping(df, "df_orders", mapping_dict, runtime_dir, destination)
+    result_df = lf_mapped.collect()
+
+    assert "order_id_int" in result_df.columns
+    assert "customer_id_int" in result_df.columns
+    assert result_df.height == 2
+
+    # Check if mapping files were promoted to destination
+    assert (destination / "order_id_mapping.parquet").exists()
+    assert (destination / "customer_id_mapping.parquet").exists()
+
+
+# ------------------------------------------------------------
 # EXECUTOR INTEGRATION TESTS
 # ------------------------------------------------------------
 
@@ -170,7 +229,6 @@ def test_apply_contract_orders_success(tmp_path, sample_orders_df):
         run_context.raw_snapshot_path / f"df_orders_{suffix}.csv"
     )
 
-    # New 3-tuple return signature
     report, inv_ids, val_ids = apply_contract(run_context, "df_orders")
 
     assert report["status"] == "success"
@@ -186,7 +244,6 @@ def test_apply_contract_cascade_and_valid_propagation(
     run_context = RunContext.create(base=tmp_path, storage=tmp_path / "storage")
     run_context.initialize_directories()
 
-    # o1: valid, o2: unparsable, o3: impossible
     sample_orders_df = sample_orders_df.with_columns(
         pl.when(pl.col("order_id") == "o2")
         .then(pl.lit("garbage"))
@@ -206,13 +263,11 @@ def test_apply_contract_cascade_and_valid_propagation(
         run_context.raw_snapshot_path / f"df_payments_{suffix}.csv"
     )
 
-    # 1. Process Orders
     rep_o, inv_o, val_o = apply_contract(run_context, "df_orders")
     assert "o2" in inv_o  # unparsable
     assert "o3" in inv_o  # impossible
     assert "o1" in val_o  # only one valid
 
-    # 2. Process Payments (should cascade drop o2, o3 and only keep o1)
     rep_p, inv_p, val_p = apply_contract(
         run_context, "df_payments", invalid_order_ids=inv_o, valid_order_ids=val_o
     )

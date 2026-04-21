@@ -4,7 +4,7 @@
 
 import polars as pl
 from pathlib import Path
-import shutil
+from data_pipeline.shared.storage_adapter import promote_new_mapping_files
 
 ID_COLUMNS_TO_MAP = {
     "df_orders": ["order_id", "customer_id"],
@@ -87,7 +87,7 @@ def id_mapping(
     table_name: str,
     mapping_dict: dict,
     runtime_dir: Path,
-    destination: Path,
+    destination: Path | str,
 ) -> pl.LazyFrame:
     """
     Orchestrates the two-phase transformation of UUID strings to persistent Integer keys.
@@ -113,30 +113,39 @@ def id_mapping(
 
     for id_column in cols_to_map:
         mapping_filename = f"{id_column}_mapping.parquet"
-        storage_path = destination / mapping_filename
         temp_path = runtime_dir / mapping_filename
 
-        # Check if mapping exists in storage else create
-        target_path = storage_path if storage_path.exists() else temp_path
+        # When destination is a GCS URI
+        if str(destination).startswith("gs://"):
+            target_path = temp_path
+        else:
+            storage_path = destination / mapping_filename  # type: ignore
+            target_path = storage_path if storage_path.exists() else temp_path
 
         if not target_path.parent.exists():
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
         map_uuid_to_int(df, target_path, id_column)
 
-    # Promote new mapping files from runtime directory to central storage
-    if runtime_dir.exists():
-        destination.mkdir(parents=True, exist_ok=True)
-        for file in runtime_dir.glob("*_mapping.parquet"):
-            shutil.copy2(file, destination)
+    # Promote new mapping to storage
+    promote_new_mapping_files(runtime_dir=runtime_dir, destination=destination)
 
     lf_mapped = df.lazy()
 
     for id_column in cols_to_map:
         mapping_filename = f"{id_column}_mapping.parquet"
-        storage_path = destination / mapping_filename
 
-        # Enrich DataFrame with integer surrogates from the registry
+        # Switch between local and gcp IO
+        if str(destination).startswith("gs://"):
+            destination_str = str(destination)
+            if not destination_str.endswith("/"):
+                destination_str += "/"
+
+            storage_path = f"{destination_str}{mapping_filename}"
+        else:
+            storage_path = str(destination / mapping_filename)  # type: ignore
+
+        # Enriched existing id registry with new mapping
         registry_lf = pl.scan_parquet(storage_path)
         lf_mapped = lf_mapped.join(registry_lf, on=id_column, how="left")
 

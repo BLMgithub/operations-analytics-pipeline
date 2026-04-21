@@ -141,6 +141,7 @@ def upload_contracted_directory(run_context: RunContext) -> None:
 
     Contract:
     - Synchronizes the local 'contracted/' directory to 'storage_contracted_path'.
+    - Excludes the 'id_mapping' directory to prevent cross-contamination.
     - Purpose: Archives newly cleaned data for delta accumulation and historical lineage.
     """
 
@@ -167,7 +168,7 @@ def upload_contracted_directory(run_context: RunContext) -> None:
     bucket = client.bucket(bucket_name)
 
     for file in source.rglob("*"):
-        if file.is_file():
+        if file.is_file() and "id_mapping" not in file.parts:
 
             blob = bucket.blob(f"{prefix}/{file.relative_to(source)}")
             blob.upload_from_filename(file)
@@ -204,3 +205,36 @@ def download_contracted_datasets(run_context: RunContext) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
 
         blob.download_to_filename(target)
+
+
+def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> None:
+    """
+    Synchronizes new UUID mapping files from the local temporary directory to central storage.
+
+    Contract:
+    - Identifies all '*_mapping.parquet' files in the local 'runtime_dir'.
+    - Promotes them to the persistent 'destination' (local directory or GCS bucket).
+    """
+
+    if not runtime_dir.exists():
+        return
+
+    destination_str = str(destination).replace("\\", "/")
+
+    # Local filesystem case
+    if not destination_str.startswith("gs://"):
+        Path(destination).mkdir(parents=True, exist_ok=True)
+        for file in runtime_dir.glob("*_mapping.parquet"):
+            shutil.copy2(file, Path(destination))
+        return
+
+    # GCS case
+    client = storage.Client()
+    bucket_name, prefix = _split_gcs_path(destination_str)
+    bucket = client.bucket(bucket_name)
+
+    for file in runtime_dir.glob("*_mapping.parquet"):
+        if file.is_file():
+            # Create a blob with the target filename in the bucket
+            blob = bucket.blob(f"{prefix}/{file.name}")
+            blob.upload_from_filename(str(file))

@@ -130,7 +130,14 @@ def apply_contract(
         valid_ids = set(df.get_column("order_id"))
 
     temp_path = run_context.contracted_path / "id_mapping"
-    storage_mapping = Path(run_context.storage_mapping_path)
+    storage_mapping_str = run_context.storage_mapping_path
+
+    # Switch between local and gcp path
+    storage_mapping = (
+        storage_mapping_str
+        if storage_mapping_str.startswith("gs://")
+        else Path(storage_mapping_str)
+    )
 
     df = id_mapping(
         df=df,
@@ -145,6 +152,8 @@ def apply_contract(
     if not export_file(df, output_path):
         report["status"] = "failed"
         report["errors"].append("Export failed")
+
+        return report, invalid_ids, valid_ids
 
     report["status"] = "success"
 
