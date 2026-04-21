@@ -31,38 +31,37 @@ Serves as the central nervous system of the pipeline. It synchronizes data betwe
 
 ## **Execution Workflow**
 
-The orchestrator manages the lifecycle in three high-level phases, featuring a defensive synchronization loop:
+The orchestrator manages the lifecycle through a strictly gated 13-step sequence, emphasizing memory efficiency and cloud-local synchronization:
 
 ### **Phase I: Environment Initialization**
-1.  **Context Resolution**: Instantiates the `RunContext`.
-2.  **Metadata Start**: Persists the initial "RUNNING" state to `run_metadata.json`.
-3.  **Ingestion**: Downloads the required raw data snapshot from the cloud to the local workspace.
+1.  **Resolve**: Instantiates the `RunContext` and initializes background memory telemetry for real-time benchmarking.
+2.  **Hydrate (Raw)**: Synchronizes the required raw data snapshot from Cloud Storage to the local workspace.
+3.  **Initialize**: Registers the run commencement by generating `run_metadata.json` with initial "RUNNING" status.
 
-### **Phase II: The Defensive Cloud-Sync Loop**
-1.  **Gate I (Raw Validation)**: Asserts the health of the downloaded raw data.
-2.  **Contract Processing**: Filters rows and freezes schemas into the local `contracted/` path.
-3.  **Gate II (Revalidation)**: Defensive check to ensure the local Silver data is structurally sound.
-4.  **Silver Synchronization (Upload)**: Promotes the newly contracted data to the **Cloud Silver Storage** to ensure delta accumulation and persistence.
-5.  **Environment Purge**: Deletes the local `raw_snapshot/` and `contracted/` directories and triggers `gc.collect()` to free system memory.
-6.  **Silver Restoration (Download)**: Recreates the local `contracted/` directory and downloads the **accumulated Silver deltas** from the Cloud storage.
-7.  **Integration (Assembly)**: Merges the restored data into the Gold-layer event grain.
-8.  **Modeling (Semantic)**: Builds the final analytical modules.
-9.  **Gate III (Pre-Publish)**: Verifies the completeness of semantic artifacts.
+### **Phase II: Processing & Memory Reclamation**
+4.  **Validate (Raw)**: Asserts the health of the raw data snapshot; fail-fast on structural errors.
+5.  **Contract Processing**: Executes subtractive filtering and freezes schemas into the local `contracted/` path (Silver layer).
+6.  **Gate II (Revalidation)**: Defensive check to ensure contracted data meets downstream semantic requirements.
+7.  **Promote (Silver)**: Persists the newly contracted datasets to **Cloud Silver Storage**.
+8.  **Synchronize (BQ)**: Forces a metadata cache refresh for BigQuery External Tables via system procedures (`BQ.REFRESH_EXTERNAL_METADATA_CACHE`) for immediate visibility.
+9.  **Purge (Local)**: Deterministically deletes local `raw/` and `contracted/` directories and invokes `force_gc()` to reclaim RAM before the high-compute Assembly stage.
+10. **Assemble**: Flattens relational data into a unified Gold-layer event grain using the **BigQuery Storage Read API** (bypassing the need for local Silver restoration).
+11. **Modeling (Semantic)**: Builds entity-centric analytical modules (Fact/Dim tables).
 
-### **Phase III: Finalization & Cleanup**
-1.  **Promotion**: Atomically updates the production pointer (`latest_version.json`).
-2.  **Persistence**: Uploads all logs and metadata back to cloud storage.
-3.  **Final Purge**: Deletes the entire local `workspace_root`.
+### **Phase III: Activation & Finalization**
+12. **Publish**: Executes final integrity gates, performs the **BigQuery View Swap** for the BI layer, and triggers the atomic pointer swap (`_latest.json`) to activate the new version.
+13. **Finalize**: Updates terminal metadata (status, duration), uploads all telemetry/stage reports to Cloud Storage, and purges the entire local workspace.
 
 ## **Boundaries**
 
 | This component **DOES** | This component **DOES NOT** |
 | :--- | :--- |
 | Coordinate the sequence of high-level executors. | Modify rows, columns, or data values. |
-| Manage local/cloud data synchronization. | Implement business logic or aggregation rules. |
-| Manage the Silver "Upload-Purge-Download" cycle. | Define the technical schema for Fact/Dim tables. |
+| Manage local/cloud data synchronization and BQ caching. | Implement business logic or aggregation rules. |
+| Enforce the "Purge-before-Assembly" memory optimization. | Define the technical schema for Fact/Dim tables. |
 | Manage the `finally` block for resource safety. | Direct file-level I/O within a stage (Delegated). |
 | Aggregate stage-level reports into a run summary. | Perform granular row-level validation. |
+| Monitor and log real-time memory telemetry. | Execute SQL transformations directly (Delegated). |
 
 ## **Failure & Severity Model**
 

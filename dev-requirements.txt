@@ -12,8 +12,10 @@ polars==1.39.0
 pyarrow==19.0.0
 google-cloud-storage
 google-cloud-bigquery>=3.0.0
+google-cloud-bigquery-storage>=2.36.0
 
 # dev & testing
+psutil==7.2.2
 pytest==9.0.2
 pytest-cov
 black==24.3.0

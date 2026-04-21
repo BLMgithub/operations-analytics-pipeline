@@ -6,7 +6,10 @@ import polars as pl
 from pathlib import Path
 from typing import Dict, Callable, Any, List
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.loader_exporter import load_historical_data
+from data_pipeline.shared.loader_exporter import (
+    load_historical_data,
+    scan_gcs_uris_from_bigquery,
+)
 from data_pipeline.shared.modeling_configs import ASSEMBLE_SCHEMA, ASSEMBLE_DTYPES
 
 EVENT_TABLES = ["df_orders", "df_order_items", "df_payments"]
@@ -151,7 +154,7 @@ def derive_fields(lf: pl.LazyFrame) -> pl.LazyFrame:
         )
         .dt.total_days()
         .cast(pl.Int16),
-        order_date=pl.col("order_purchase_timestamp").dt.date(),
+        order_date=pl.col("order_purchase_timestamp").dt.date().cast(pl.Datetime("us")),
         order_year_week=pl.col("order_purchase_timestamp")
         .dt.strftime("%G-W%V")
         .cast(pl.Categorical),
@@ -187,9 +190,17 @@ def freeze_schema(lf: pl.LazyFrame) -> pl.LazyFrame:
     if missing_cols:
         raise RuntimeError(f"missing required columns: {sorted(missing_cols)}")
 
-    lf_contract = lf.select(ASSEMBLE_SCHEMA).cast(pl.Schema(ASSEMBLE_DTYPES))
+    lf_contract = lf.select(ASSEMBLE_SCHEMA)
 
-    return lf_contract
+    datetime_cols = [
+        col for col, dtype in ASSEMBLE_DTYPES.items() if isinstance(dtype, pl.Datetime)
+    ]
+
+    lf_contract = lf_contract.with_columns(
+        [pl.col(col).dt.cast_time_unit("us") for col in datetime_cols]
+    )
+
+    return lf_contract.cast(pl.Schema(ASSEMBLE_DTYPES))
 
 
 # ------------------------------------------------------------
@@ -201,12 +212,14 @@ def dimension_references(
     lf: pl.LazyFrame,
     primary_key: list[str],
     req_column: list[str],
+    dtypes: dict,
 ) -> pl.LazyFrame:
     """
     Extracts a unique reference dataset from a historical source.
 
     Contract:
     - Subtractive Filtering: Selects specified 'req_column' set and enforces uniqueness.
+    - Type Enforcement: Casts columns to the formats defined in the provided 'dtypes' schema.
 
     Invariants:
     - Dataset Grain: Strictly one row per 'primary_key'.
@@ -218,7 +231,7 @@ def dimension_references(
     - [Structural] Crashes if input LazyFrame lacks 'primary_key' or 'req_column'.
     """
 
-    lf_dim = lf.select(req_column).unique(subset=primary_key)
+    lf_dim = lf.select(req_column).unique(subset=primary_key).cast(pl.Schema(dtypes))
 
     return lf_dim
 
@@ -283,10 +296,10 @@ def task_wrapper(
 
 def load_event_table(run_context: RunContext, report: Dict) -> Any:
     """
-    Batch-loads core event tables required for assembly.
+    Batch-loads core event tables required for assembly from BigQuery.
 
     Contract:
-    - Hydrate: Iterates through EVENT_TABLES and loads Parquet files from 'contracted_path'.
+    - Hydrate: Iterates through EVENT_TABLES and streams data via scan_gcs_uris_from_bigquery.
 
     Outputs:
     - Dict keyed by table name containing loaded LazyFrames.
@@ -295,22 +308,31 @@ def load_event_table(run_context: RunContext, report: Dict) -> Any:
     - [Operational] Returns None if any required table is missing or fails to load.
     """
 
-    base_contracted_path = run_context.contracted_path
     tables = {}
 
     for table_name in EVENT_TABLES:
         try:
-            df = load_historical_data(
-                base_path=base_contracted_path,
-                table_name=table_name,
-                log_info=lambda msg: loaded_data(msg, report),
-            )
+            # Switch between local and gcp IO
+            if run_context.bq_project_id == "PROJECT_ID_NOT_DETECTED":
+                df = load_historical_data(
+                    base_path=run_context.storage_contracted_path,
+                    table_name=table_name,
+                    log_info=lambda msg: loaded_data(msg, report),
+                )
+
+            else:
+                df = scan_gcs_uris_from_bigquery(
+                    project_id=run_context.bq_project_id,
+                    dataset_id=run_context.bq_dataset_id,
+                    table_id=table_name,
+                    log_info=lambda msg: loaded_data(msg, report),
+                )
 
             if df is not None:
                 tables[table_name] = df
 
         except Exception as e:
-            log_error(f"Required table {table_name} not found: {e}", report)
+            log_error(f"Required table {table_name} not found : {e}", report)
             return None
 
     if len(tables) < len(EVENT_TABLES):

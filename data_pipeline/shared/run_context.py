@@ -5,12 +5,12 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from datetime import datetime
+from datetime import datetime as dt, timezone
 import uuid
 
 
 def _generate_run_id() -> str:
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    timestamp = dt.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     random_suffix = uuid.uuid4().hex[:6]
     return f"{timestamp}_{random_suffix}"
 
@@ -49,10 +49,15 @@ class RunContext:
     # Storage paths
     storage_raw_path: str
     storage_contracted_path: str
+    storage_mapping_path: str
     storage_published_path: str
     version_path: str
     latest_pointer_path: str
     storage_runs_path: str
+
+    # BigQuery coordinates
+    bq_project_id: str
+    bq_dataset_id: str
 
     # NOTE: base =./runtime and storage= ./data were local test paths
     @classmethod
@@ -62,6 +67,8 @@ class RunContext:
         storage: str | Path = "gs://ops-pipeline-storage-dev",  # "./data",
         run_id: str | None = None,
         run_id_factory: Callable[[], str] | None = None,
+        bq_project_id: str | None = None,
+        bq_dataset_id: str | None = None,
     ) -> "RunContext":
         """
         Factory method for instantiating a fresh execution context.
@@ -73,6 +80,8 @@ class RunContext:
         Returns:
             RunContext: An initialized context with all path mappings resolved.
         """
+
+        import os
 
         base_path = Path(base)
 
@@ -95,10 +104,18 @@ class RunContext:
         storage_root = str(storage)
         storage_raw_path = f"{storage_root}/raw"
         storage_contracted_path = f"{storage_root}/contracted"
+        storage_mapping_path = f"{storage_root}/id_mapping"
         storage_published_path = f"{storage_root}/published"
         version_path = f"{storage_published_path}/v{run_id}"
         latest_pointer_path = f"{storage_published_path}/_latest.json"
         storage_runs_path = f"{storage_root}/run_artifact/{run_id}"
+
+        bq_project_id = os.getenv("GCP_PROJECT", "PROJECT_ID_NOT_DETECTED")
+
+        if not bq_project_id:
+            bq_project_id = "PROJECT_ID_NOT_DETECTED"
+
+        bq_dataset_id = os.getenv("BQ_DATASET_ID", "BQ_DATASET_ID_NOT_DETECTED")
 
         return cls(
             run_id=run_id,
@@ -115,10 +132,14 @@ class RunContext:
             # Storage paths
             storage_raw_path=storage_raw_path,
             storage_contracted_path=storage_contracted_path,
+            storage_mapping_path=storage_mapping_path,
             storage_published_path=storage_published_path,
             version_path=version_path,
             latest_pointer_path=latest_pointer_path,
             storage_runs_path=storage_runs_path,
+            # BigQuery
+            bq_project_id=bq_project_id,
+            bq_dataset_id=bq_dataset_id,
         )
 
     def initialize_directories(self) -> None:

@@ -5,14 +5,15 @@
 from pathlib import Path
 import polars as pl
 from typing import Optional, Callable, Tuple, Any
+from google.cloud import bigquery
 
 
-def normalize_datetimes(lf: pl.LazyFrame) -> pl.LazyFrame:
+def normalize_datetimes(lf: pl.LazyFrame | pl.DataFrame) -> Any:
     """
     Standardizes all Datetime columns to a unified resolution (microseconds).
 
     Contract:
-    - Discovery: Scans the LazyFrame schema for all pl.Datetime fields.
+    - Discovery: Scans the schema for all pl.Datetime fields (accepts both LazyFrame and DataFrame).
     - Transformation: Forcefully casts identified columns to 'us' (microseconds) resolution.
 
     Invariants:
@@ -21,17 +22,75 @@ def normalize_datetimes(lf: pl.LazyFrame) -> pl.LazyFrame:
       between local development and cloud production environments.
 
     Outputs:
-    - LazyFrame with resolution-standardized temporal fields.
+    - LazyFrame or DataFrame (matching input type) with resolution-standardized temporal fields.
     """
 
-    schema = lf.collect_schema()
+    schema = lf.collect_schema() if isinstance(lf, pl.LazyFrame) else lf.schema
+
     datetime_cols = [
         col for col, dtype in schema.items() if isinstance(dtype, pl.Datetime)
     ]
     if not datetime_cols:
         return lf
 
-    return lf.with_columns([pl.col(c).dt.cast_time_unit("us") for c in datetime_cols])
+    return lf.with_columns(
+        [pl.col(col).dt.cast_time_unit("us") for col in datetime_cols]
+    )
+
+
+def scan_gcs_uris_from_bigquery(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    log_info: Optional[Callable[[str], None]] = None,
+) -> pl.LazyFrame:
+    """
+    Streams data natively into Polars using BigQuery External Table metadata as a read bridge.
+
+    Contract:
+    - Discovery: Uses the BigQuery API to fetch the authoritative 'source_uris' for the External Table.
+    - Optimization: Bypasses BigQuery compute and memory-bound Arrow downloads entirely.
+    - Zero-Disk Native Streaming: Passes the extracted GCS URIs directly to Polars' Rust-based
+      object-store engine for high-performance, concurrent, lazy evaluation from Cloud Storage.
+
+    Invariants:
+    - Lazy Evaluation: Returns a pure pl.LazyFrame without executing any I/O blocking reads.
+    - Source Consistency: Relies on BigQuery as the source-of-truth for file locations.
+
+    Outputs:
+    - A pl.LazyFrame ready for downstream streaming processing.
+    """
+
+    if project_id == "PROJECT_ID_NOT_DETECTED":
+        raise ValueError(
+            "Project ID is set to 'PROJECT_ID_NOT_DETECTED'. Pipeline environment variables are likely missing."
+        )
+
+    try:
+        client = bigquery.Client(project=project_id)
+        table_ref = f"{project_id}.{dataset_id}.{table_id}"
+
+        file_query = f"SELECT DISTINCT _FILE_NAME FROM `{table_ref}`"
+        query_result = client.query(file_query).result()
+        uris = [row[0] for row in query_result]
+
+        if not uris:
+            raise ValueError(f"No source URIs found in external table {table_ref}.")
+
+        lfs = [normalize_datetimes(pl.scan_parquet(uri)) for uri in uris]
+        lf = pl.concat(lfs, how="vertical_relaxed")
+
+    except Exception as e:
+        if log_info:
+            log_info(f"Failed to initialize stream for {dataset_id}.{table_id}: {e}")
+        raise
+
+    if log_info:
+        log_info(
+            f"Connected to GCS Stream via BigQuery: {dataset_id}.{table_id} ({len(uris)} URIs)"
+        )
+
+    return lf
 
 
 FILE_LOADERS = {
@@ -126,7 +185,7 @@ def load_historical_data(
         raise FileNotFoundError(f"No Parquet files found for {table_name}")
 
     lfs = [normalize_datetimes(pl.scan_parquet(f)) for f in all_files]
-    lf_unified = pl.concat(lfs)
+    lf_unified = pl.concat(lfs, how="vertical_relaxed")
 
     if log_info:
         log_info(
@@ -165,7 +224,12 @@ def load_assembled_data(
     if not any(base_path.glob(f"{table_name}*.parquet")):
         raise FileNotFoundError(f"No Parquet files found for {table_name}")
 
-    lf = normalize_datetimes(pl.scan_parquet(pattern))
+    lf = normalize_datetimes(
+        pl.scan_parquet(
+            pattern,
+            cast_options=pl.ScanCastOptions(datetime_cast="nanosecond-downcast"),
+        )
+    )
 
     if log_info:
         log_info(f"Scanned: {table_name} for lazy evaluation")
@@ -208,11 +272,26 @@ def export_file(
         row_count = 0
 
         if isinstance(df, pl.DataFrame):
+            df = normalize_datetimes(df)
             df.write_parquet(output_path, compression="brotli")
             row_count = len(df)
 
         elif isinstance(df, pl.LazyFrame):
-            df.sink_parquet(output_path, compression="snappy")
+            df = normalize_datetimes(df)
+
+            try:
+                pa_schema = df.limit(0).collect().to_arrow().schema
+                df.sink_parquet(
+                    output_path, compression="snappy", arrow_schema=pa_schema
+                )
+
+            except Exception as e:
+                print(
+                    f"[WARNING] Arrow schema override failed, falling back to native sink:{e}"
+                )
+
+                df.sink_parquet(output_path, compression="snappy")
+
             row_count = "streaming"
 
         else:

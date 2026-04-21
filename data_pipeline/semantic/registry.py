@@ -22,7 +22,6 @@ from data_pipeline.shared.modeling_configs import (
     PRODUCT_DIM_DTYPES,
 )
 
-
 SEMANTIC_MODULES = {
     "seller_semantic": {
         "builder": build_seller_semantic,

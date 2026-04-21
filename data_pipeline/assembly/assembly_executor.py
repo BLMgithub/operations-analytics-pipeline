@@ -3,11 +3,15 @@
 # =============================================================================
 
 import gc
+from typing import Dict
 import ctypes
 import platform
-from typing import Dict
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.loader_exporter import load_historical_data, export_file
+from data_pipeline.shared.loader_exporter import (
+    load_historical_data,
+    scan_gcs_uris_from_bigquery,
+    export_file,
+)
 from data_pipeline.shared.modeling_configs import DIMENSION_REFERENCES
 from data_pipeline.assembly.assembly_logic import (
     init_report,
@@ -181,20 +185,26 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
         lf_raw = None
         df_dim = None
 
-        base_contracted_path = run_context.contracted_path
-
         try:
-            lf_raw = load_historical_data(
-                base_path=base_contracted_path,
-                table_name=table,
-                log_info=lambda msg: loaded_data(msg, report),
-            )
+            # Switch between local and gcp IO
+            if run_context.bq_project_id == "PROJECT_ID_NOT_DETECTED":
+                lf_raw = load_historical_data(
+                    base_path=run_context.storage_contracted_path, table_name=table
+                )
+            else:
+                lf_raw = scan_gcs_uris_from_bigquery(
+                    project_id=run_context.bq_project_id,
+                    dataset_id=run_context.bq_dataset_id,
+                    table_id=table,
+                    log_info=lambda msg: loaded_data(msg, report),
+                )
 
             if lf_raw is None:
                 return False
 
             primary_key = config.get("primary_key", [])
             require_col = config.get("required_column", [])
+            dtypes = config.get("dtypes", {})
 
             ok, df_dim = task_wrapper(
                 report=report,
@@ -204,6 +214,7 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
                 lf=lf_raw,
                 primary_key=primary_key,
                 req_column=require_col,
+                dtypes=dtypes,
             )
 
             if not ok:
