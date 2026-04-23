@@ -1,10 +1,13 @@
 # =============================================================================
-# UUIDs to Integers Mappings Implementation
+# UUIDs to Integers Mappings
 # =============================================================================
 
 import polars as pl
 from pathlib import Path
-from data_pipeline.shared.storage_adapter import promote_new_mapping_files
+from data_pipeline.shared.storage_adapter import (
+    promote_new_mapping_files,
+    check_gcs_path_exists,
+)
 
 ID_COLUMNS_TO_MAP = {
     "df_orders": ["order_id", "customer_id"],
@@ -15,29 +18,46 @@ ID_COLUMNS_TO_MAP = {
 }
 
 
-def map_uuid_to_int(df: pl.DataFrame, mapping_file_path: Path, id_column: str) -> None:
+def map_uuid_to_int(
+    df: pl.DataFrame,
+    id_column: str,
+    storage_destination: str | Path,
+    local_output_path: Path,
+) -> None:
     """
-    Enforces idempotency and persistence of UUID-to-Integer mappings for a specific column.
+    Enforces idempotency and persistence of UUID-to-Integer mappings using a Delta
+        pattern.
 
-    Contract (Executor):
-    - Discovery: Extracts unique UUIDs from the target column to minimize memory footprint.
-    - Differential Update: Scans existing registry (if present) to identify UUIDs via set exclusion.
-    - Registry Extension: Generates sequential UInt32 identifiers starting from max(existing_id) + 1.
-    - Atomic Write: Sinks updated registry to a temporary Parquet file before performing an atomic replace to ensure data integrity.
-
-    Invariants:
-    - Guarantees 1:1 mapping between UUID strings and UInt32 integers.
-    - Ensures newly assigned IDs are strictly greater than any existing ID in the registry.
-    - Never modifies the input DataFrame in-place or returns it.
+    Contract:
+    - Discovery: Scans ALL existing mapping deltas from storage (glob) to find max_id
+        and existing UUIDs.
+    - Differential Update: Identifies only the new UUIDs not present in history.
+    - Registry Extension: Generates new IDs starting from max(existing) + 1.
+    - Delta Write: Saves ONLY the new mappings to a local run-specific file for later
+        promotion.
     """
 
     int_col_name = f"{id_column}_int"
-
     delta_ids = df.select(id_column).unique().get_column(id_column)
 
-    if mapping_file_path.exists():
-        mapping_lf = pl.scan_parquet(mapping_file_path)
+    # Resolve Storage Path (Local or GCS)
+    dest_str = str(storage_destination).replace("\\", "/")
+    is_gcs = dest_str.startswith("gs://")
 
+    column_storage_dir = f"{dest_str}/{id_column}"
+    storage_glob = f"{column_storage_dir}/*.parquet"
+
+    # Check existence and Scan history
+    exists = (
+        check_gcs_path_exists(column_storage_dir)
+        if is_gcs
+        else Path(column_storage_dir).exists()
+    )
+
+    if exists:
+        mapping_lf = pl.scan_parquet(storage_glob)
+
+        # Get max ID across all deltas
         max_id = mapping_lf.select(pl.col(int_col_name).max()).collect().item()
         max_id = max_id if max_id is not None else 0
 
@@ -47,39 +67,22 @@ def map_uuid_to_int(df: pl.DataFrame, mapping_file_path: Path, id_column: str) -
             .collect()
             .get_column(id_column)
         )
-
-        # Compare the delta ids to existing record while streaming
         new_uuids = delta_ids.filter(~delta_ids.is_in(existing_ids.to_list()))
-        df_new_uuids = pl.DataFrame({id_column: new_uuids})
-
     else:
-        mapping_lf = pl.LazyFrame(
-            schema={id_column: pl.String, int_col_name: pl.UInt32}
-        )
         max_id = 0
-        df_new_uuids = pl.DataFrame({id_column: delta_ids})
+        new_uuids = delta_ids
 
-    if df_new_uuids.height > 0:
+    # If new UUIDs found, write a new detla file
+    if new_uuids.len() > 0:
         start_val = max_id + 1
-
-        # Attach new mapped Uint32 ID
-        new_mapping_df = df_new_uuids.with_columns(
-            pl.int_range(
-                start_val, df_new_uuids.height + start_val, dtype=pl.UInt32
-            ).alias(int_col_name)
+        new_mapping_df = pl.DataFrame({id_column: new_uuids}).with_columns(
+            pl.int_range(start_val, new_uuids.len() + start_val, dtype=pl.UInt32).alias(
+                int_col_name
+            )
         )
 
-        # Temporarily hold while syncing updates
-        temp_map_path = mapping_file_path.with_suffix(".tmp.parquet")
-
-        if mapping_file_path.exists():
-            updated_registy_lf = pl.concat([mapping_lf, new_mapping_df.lazy()])
-            updated_registy_lf.sink_parquet(temp_map_path)
-
-        else:
-            new_mapping_df.write_parquet(temp_map_path)
-
-        temp_map_path.replace(mapping_file_path)
+        local_output_path.parent.mkdir(parents=True, exist_ok=True)
+        new_mapping_df.write_parquet(local_output_path)
 
 
 def id_mapping(
@@ -88,65 +91,42 @@ def id_mapping(
     mapping_dict: dict,
     runtime_dir: Path,
     destination: Path | str,
+    run_id: str,
 ) -> pl.LazyFrame:
     """
-    Orchestrates the two-phase transformation of UUID strings to persistent Integer keys.
+    Orchestrates the transformation of UUID strings to persistent Integer keys using
+        Delta Architecture.
 
     Execution Workflow:
-    1. Update (Eager): Iterates through all specified ID columns, updating their respective physical registries on disk.
-    2. Promote: Synchronizes newly created mapping files from the runtime environment to central storage.
-    3. Transform (Lazy): Constructs a chain of left-joins against the persistent registries to attach integer keys.
-
-    Contract:
-    - Integrity: Ensures every unique UUID in the input DataFrame has a corresponding entry in the mapping registry before the join.
-    - Efficiency: Utilizes LazyFrame chaining and Parquet scanning to defer data loading until terminal execution.
-    - Grain: Maintains the original grain of the input DataFrame; appends {column}_int columns.
-
-    Outputs:
-    - A pl.LazyFrame ready for streaming execution, containing original data enriched with integer surrogates.
+    1. Update (Delta): Creates new mapping files only for previously unseen UUIDs.
+    2. Promote: Uploads the tiny new delta files to the central storage directory.
+    3. Transform (Lazy): Joins the input against the full set of deltas (glob scan).
     """
 
     cols_to_map = mapping_dict.get(table_name, [])
-
     if not cols_to_map:
         return df.lazy()
 
     for id_column in cols_to_map:
-        mapping_filename = f"{id_column}_mapping.parquet"
-        temp_path = runtime_dir / mapping_filename
+        local_delta_path = runtime_dir / id_column / f"map_{run_id}.parquet"
 
-        # When destination is a GCS URI
-        if str(destination).startswith("gs://"):
-            target_path = temp_path
-        else:
-            storage_path = destination / mapping_filename  # type: ignore
-            target_path = storage_path if storage_path.exists() else temp_path
+        map_uuid_to_int(
+            df=df,
+            id_column=id_column,
+            storage_destination=destination,
+            local_output_path=local_delta_path,
+        )
 
-        if not target_path.parent.exists():
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        map_uuid_to_int(df, target_path, id_column)
-
-    # Promote new mapping to storage
     promote_new_mapping_files(runtime_dir=runtime_dir, destination=destination)
 
+    # Apply mapped ids to dataframe
+    dest_str = str(destination).replace("\\", "/")
     lf_mapped = df.lazy()
 
     for id_column in cols_to_map:
-        mapping_filename = f"{id_column}_mapping.parquet"
+        storage_glob = f"{dest_str}/{id_column}/*.parquet"
 
-        # Switch between local and gcp IO
-        if str(destination).startswith("gs://"):
-            destination_str = str(destination)
-            if not destination_str.endswith("/"):
-                destination_str += "/"
-
-            storage_path = f"{destination_str}{mapping_filename}"
-        else:
-            storage_path = str(destination / mapping_filename)  # type: ignore
-
-        # Enriched existing id registry with new mapping
-        registry_lf = pl.scan_parquet(storage_path)
+        registry_lf = pl.scan_parquet(storage_glob)
         lf_mapped = lf_mapped.join(registry_lf, on=id_column, how="left")
 
     return lf_mapped

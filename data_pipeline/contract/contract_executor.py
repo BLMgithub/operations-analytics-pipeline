@@ -145,6 +145,7 @@ def apply_contract(
         mapping_dict=ID_COLUMNS_TO_MAP,
         runtime_dir=temp_path,
         destination=storage_mapping,
+        run_id=run_context.run_id,
     )
 
     output_path = run_context.contracted_path / f"{filename}.parquet"

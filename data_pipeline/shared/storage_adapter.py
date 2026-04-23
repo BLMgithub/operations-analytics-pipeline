@@ -23,6 +23,18 @@ def _split_gcs_path(path: str):
     return bucket, prefix
 
 
+def check_gcs_path_exists(gcs_uri: str) -> bool:
+    """
+    Helper to check if a GCS prefix has any blobs (effectively checking if 'directory' exists).
+    """
+    client = storage.Client()
+    bucket_name, prefix = _split_gcs_path(gcs_uri)
+
+    bucket = client.bucket(bucket_name)
+    blobs = list(bucket.list_blobs(prefix=prefix, max_results=1))
+    return len(blobs) > 0
+
+
 def download_raw_snapshot(run_context: RunContext) -> None:
     """
     Synchronizes the raw data snapshot from Cloud Storage to the local workspace.
@@ -212,8 +224,8 @@ def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> Non
     Synchronizes new UUID mapping files from the local temporary directory to central storage.
 
     Contract:
-    - Identifies all '*_mapping.parquet' files in the local 'runtime_dir'.
-    - Promotes them to the persistent 'destination' (local directory or GCS bucket).
+    - Recursively identifies all '*.parquet' files in the local 'runtime_dir' subdirectories.
+    - Promotes them to the persistent 'destination' under matching subdirectories.
     """
 
     if not runtime_dir.exists():
@@ -223,9 +235,16 @@ def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> Non
 
     # Local filesystem case
     if not destination_str.startswith("gs://"):
-        Path(destination).mkdir(parents=True, exist_ok=True)
-        for file in runtime_dir.glob("*_mapping.parquet"):
-            shutil.copy2(file, Path(destination))
+        dest_base = Path(destination)
+
+        for file in runtime_dir.rglob("*.parquet"):
+            if file.is_file():
+                # Reconstruct relative path in destination
+                # (e.g., destination/order_id/run_id.parquet)
+                relative_path = file.relative_to(runtime_dir)
+                target_path = dest_base / relative_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file, target_path)
         return
 
     # GCS case
@@ -233,8 +252,8 @@ def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> Non
     bucket_name, prefix = _split_gcs_path(destination_str)
     bucket = client.bucket(bucket_name)
 
-    for file in runtime_dir.glob("*_mapping.parquet"):
+    for file in runtime_dir.rglob("*.parquet"):
         if file.is_file():
-            # Create a blob with the target filename in the bucket
-            blob = bucket.blob(f"{prefix}/{file.name}")
+            relative_path = file.relative_to(runtime_dir).as_posix()
+            blob = bucket.blob(f"{prefix}/{relative_path}")
             blob.upload_from_filename(str(file))
