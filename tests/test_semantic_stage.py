@@ -27,6 +27,7 @@ def valid_customers_df():
     return pl.DataFrame(
         {
             "customer_id": ["cos1", "cos2"],
+            "customer_id_int": [101, 102],
             "customer_state": ["SP", "RJ"],
             "customer_city": ["Sao Paulo", "Rio"],
             "customer_segment": ["A", "B"],
@@ -35,6 +36,7 @@ def valid_customers_df():
     ).with_columns(
         [
             pl.col("account_creation_date").str.strptime(pl.Datetime, "%Y-%m-%d"),
+            pl.col("customer_id_int").cast(pl.UInt32),
         ]
     )
 
@@ -44,6 +46,7 @@ def valid_products_df():
     return pl.DataFrame(
         {
             "product_id": ["prod1", "prod2"],
+            "product_id_int": [201, 202],
             "product_category_name": ["tech", "home"],
             "product_weight_g": [100.0, 500.0],
             "product_length_cm": [10.0, 20.0],
@@ -52,7 +55,7 @@ def valid_products_df():
             "product_fragility_index": ["Low", "High"],
             "supplier_tier": ["Gold", "Silver"],
         }
-    )
+    ).with_columns([pl.col("product_id_int").cast(pl.UInt32)])
 
 
 @pytest.fixture
@@ -60,10 +63,14 @@ def valid_assembled_df():
     df = pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
+            "order_id_int": [1, 2],
             "seller_id": ["seller1", "seller2"],
+            "seller_id_int": [301, 302],
             "customer_id": ["cos1", "cos2"],
+            "customer_id_int": [101, 102],
             "order_revenue": [12.34, 56.78],
             "product_id": ["prod1", "prod2"],
+            "product_id_int": [201, 202],
             "order_status": ["delivered", "delivered"],
             "order_purchase_timestamp": [
                 "2023-01-02 09:00:00",
@@ -115,6 +122,10 @@ def valid_assembled_df():
             pl.col("order_year").cast(pl.Int16),
             pl.col("order_revenue").cast(pl.Float32),
             pl.col("run_id").cast(pl.Categorical),
+            pl.col("order_id_int").cast(pl.UInt32),
+            pl.col("seller_id_int").cast(pl.UInt32),
+            pl.col("customer_id_int").cast(pl.UInt32),
+            pl.col("product_id_int").cast(pl.UInt32),
         ]
     )
     return df
@@ -151,7 +162,7 @@ def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled
     seller_semantic = build_seller_semantic(valid_assembled_df.lazy(), run_context)
 
     expected_fact_len = (
-        valid_assembled_df.select(["seller_id", "order_year_week"]).unique().height
+        valid_assembled_df.select(["seller_id_int", "order_year_week"]).unique().height
     )
 
     fact_df = seller_semantic["seller_weekly_fact"]
@@ -162,7 +173,7 @@ def test_seller_semantic_model_grain_preserved_success(tmp_path, valid_assembled
     dim_df = seller_semantic["seller_dim"]
     if isinstance(dim_df, pl.LazyFrame):
         dim_df = dim_df.collect()
-    expected_dim_len = valid_assembled_df["seller_id"].n_unique()
+    expected_dim_len = valid_assembled_df["seller_id_int"].n_unique()
     assert dim_df.height == expected_dim_len
 
 

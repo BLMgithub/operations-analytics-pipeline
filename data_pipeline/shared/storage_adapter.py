@@ -23,6 +23,18 @@ def _split_gcs_path(path: str):
     return bucket, prefix
 
 
+def check_gcs_path_exists(gcs_uri: str) -> bool:
+    """
+    Helper to check if a GCS prefix has any blobs (effectively checking if 'directory' exists).
+    """
+    client = storage.Client()
+    bucket_name, prefix = _split_gcs_path(gcs_uri)
+
+    bucket = client.bucket(bucket_name)
+    blobs = list(bucket.list_blobs(prefix=prefix, max_results=1))
+    return len(blobs) > 0
+
+
 def download_raw_snapshot(run_context: RunContext) -> None:
     """
     Synchronizes the raw data snapshot from Cloud Storage to the local workspace.
@@ -141,6 +153,7 @@ def upload_contracted_directory(run_context: RunContext) -> None:
 
     Contract:
     - Synchronizes the local 'contracted/' directory to 'storage_contracted_path'.
+    - Excludes the 'id_mapping' directory to prevent cross-contamination.
     - Purpose: Archives newly cleaned data for delta accumulation and historical lineage.
     """
 
@@ -167,40 +180,81 @@ def upload_contracted_directory(run_context: RunContext) -> None:
     bucket = client.bucket(bucket_name)
 
     for file in source.rglob("*"):
-        if file.is_file():
+        if file.is_file() and "id_mapping" not in file.parts:
 
             blob = bucket.blob(f"{prefix}/{file.relative_to(source)}")
             blob.upload_from_filename(file)
 
 
-def download_contracted_datasets(run_context: RunContext) -> None:
+# NOTE: Legacy architecture helper, retain for fallback.
+# def download_contracted_datasets(run_context: RunContext) -> None:
+#     """
+#     Populate the reconstructed local contracted/ with full historical delta set from Silver Cloud storage.
+
+#     Contract:
+#     - Downloads the full accumulated Silver state from 'storage_contracted_path'.
+#     """
+
+#     source = run_context.storage_contracted_path
+#     destination = run_context.contracted_path
+
+#     # Local filesystem case
+#     if not str(source).startswith("gs://"):
+#         shutil.copytree(source, destination, dirs_exist_ok=True)
+#         return
+
+#     # GCS case
+#     client = storage.Client()
+
+#     bucket_name, prefix = _split_gcs_path(source)
+
+#     bucket = client.bucket(bucket_name)
+
+#     for blob in bucket.list_blobs(prefix=prefix):
+#         if blob.name.endswith("/"):
+#             continue
+
+#         target = destination / Path(blob.name).name
+#         target.parent.mkdir(parents=True, exist_ok=True)
+
+#         blob.download_to_filename(target)
+
+
+def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> None:
     """
-    Populate the reconstructed local contracted/ with full historical delta set from Silver Cloud storage.
+    Synchronizes new UUID mapping files from the local temporary directory to central storage.
 
     Contract:
-    - Downloads the full accumulated Silver state from 'storage_contracted_path'.
+    - Recursively identifies all '*.parquet' files in the local 'runtime_dir' subdirectories.
+    - Promotes them to the persistent 'destination' under matching subdirectories.
     """
 
-    source = run_context.storage_contracted_path
-    destination = run_context.contracted_path
+    if not runtime_dir.exists():
+        return
+
+    destination_str = str(destination).replace("\\", "/")
 
     # Local filesystem case
-    if not str(source).startswith("gs://"):
-        shutil.copytree(source, destination, dirs_exist_ok=True)
+    if not destination_str.startswith("gs://"):
+        dest_base = Path(destination)
+
+        for file in runtime_dir.rglob("*.parquet"):
+            if file.is_file():
+                # Reconstruct relative path in destination
+                # (e.g., destination/order_id/run_id.parquet)
+                relative_path = file.relative_to(runtime_dir)
+                target_path = dest_base / relative_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file, target_path)
         return
 
     # GCS case
     client = storage.Client()
-
-    bucket_name, prefix = _split_gcs_path(source)
-
+    bucket_name, prefix = _split_gcs_path(destination_str)
     bucket = client.bucket(bucket_name)
 
-    for blob in bucket.list_blobs(prefix=prefix):
-        if blob.name.endswith("/"):
-            continue
-
-        target = destination / Path(blob.name).name
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        blob.download_to_filename(target)
+    for file in runtime_dir.rglob("*.parquet"):
+        if file.is_file():
+            relative_path = file.relative_to(runtime_dir).as_posix()
+            blob = bucket.blob(f"{prefix}/{relative_path}")
+            blob.upload_from_filename(str(file))

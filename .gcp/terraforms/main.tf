@@ -31,6 +31,8 @@ locals {
     "cloudscheduler.googleapis.com",
     "iamcredentials.googleapis.com",
     "drive.googleapis.com",
+    "bigquery.googleapis.com",
+    "bigqueryconnection.googleapis.com",
   ]
 }
 

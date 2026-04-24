@@ -12,12 +12,12 @@
 
 **Purpose**
 
-Integrates multiple normalized relational tables into a unified, analytical "Event" dataset and extracts high-fidelity "Dimension" references. It transforms raw business facts into a ready-to-model state by enforcing cardinality rules and calculating temporal performance metrics.
+Integrates multiple normalized relational tables into a unified, analytical "Event" dataset and extracts high-fidelity "Dimension" references. It transforms raw business facts into a ready-to-model state by enforcing cardinality rules, leveraging the Primitive Integer Pipeline for memory efficiency, and calculating temporal performance metrics.
 
 **Invariants**
-* **Strict Order-ID Grain:** The primary event output is guaranteed to be exactly 1 row per `order_id`. Any operation causing cardinality explosion triggers a terminal failure.
+* **Strict Order-ID Grain:** The primary event output is guaranteed to be exactly 1 row per `order_id_int`. Any operation causing cardinality explosion triggers a terminal failure.
 * **Inner-Join Priority:** To maintain analytical integrity, orders without corresponding items are purged.
-* **Temporal Determinism:** All lead times, lags, and delays are calculated as integer-day durations based on validated UTC timestamps.
+* **Temporal Determinism:** All lead times, lags, and delays are calculated as integer-day durations based on validated UTC timestamps pre-normalized to microsecond resolution.
 * **Reference Uniqueness:** Dimension reference tables (Customers, Products) are strictly deduplicated by their primary keys.
 
 **Inputs**
@@ -36,7 +36,7 @@ The **Executor** coordinates two distinct sub-orchestrations:
 ### **Workflow I: Event Assembly**
 1.  **Batch Load:** Fetches the required triplet (`orders`, `items`, `payments`) from the Silver zone.
 2.  **Merge:** Joins datasets using `merge_data`. It performs an inner join on items and a left join on payments to preserve financial data without losing order context.
-    *   **Optimization:** Employs Hash-Joins on `UInt64` keys derived from `order_id` to drastically reduce memory overhead for high-cardinality UUIDs. Utilizes pre-aggregation on payments and items to ensure a strict 1:1 grain, preventing row explosions.
+    *   **Optimization:** Employs **Integer-Joins** on pre-mapped `UInt32/UInt64` IDs (e.g., `order_id_int`) provided by the Contract Registrar to drastically reduce memory overhead. Utilizes pre-aggregation on payments and items to ensure a strict 1:1 grain, preventing row explosions.
 3.  **Derivation:** Executes `derive_fields` to calculate fulfillment lead times and extract ISO-calendar attributes.
     *   **Optimization:** Applies memory-efficient casting (e.g., `Int16` for durations, `Categorical` for repetitive strings) and drops intermediate columns early to minimize row width.
 4.  **Schema Freeze:** Projects the final `ASSEMBLE_SCHEMA` and casts all columns to `ASSEMBLE_DTYPES`.
@@ -51,7 +51,7 @@ The **Executor** coordinates two distinct sub-orchestrations:
 ## **Optimization & Memory Invariants**
 
 * **Primitive Integer Pipeline:** To operate within 4GB RAM, the pipeline converts 36-byte UUID strings into 8-byte `UInt64` hashes for joins, and 4-byte `UInt32` categoricals for payloads. This is the primary driver of memory efficiency for 36M+ row datasets.
-* **Streaming-First Join:** By deferring aggregations until after raw joins on `order_id`, we leverage Polars' streaming engine to avoid massive, materialized hash tables.
+* **Streaming-First Join:** By deferring aggregations until after raw joins on `order_id`, leveraging Polars' streaming engine to avoid massive, materialized hash tables.
 * **Low-Level Memory Reclamation:** The executor utilizes `ctypes.CDLL('libc.so.6').malloc_trim(0)` at high-water mark transitions. This forces the Linux allocator to release free memory back to the OS, preventing Cloud Run from terminating the process due to bloated (but unused) heap memory.
 * **Zero-Copy Streaming:** `sink_parquet()` is used to prevent the pipeline from fully materializing the assembly result set in memory.
 

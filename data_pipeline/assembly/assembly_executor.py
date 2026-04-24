@@ -3,11 +3,15 @@
 # =============================================================================
 
 import gc
+from typing import Dict
 import ctypes
 import platform
-from typing import Dict
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.loader_exporter import load_historical_table, export_file
+from data_pipeline.shared.loader_exporter import (
+    load_historical_data,
+    scan_gcs_uris_from_bigquery,
+    export_file,
+)
 from data_pipeline.shared.modeling_configs import DIMENSION_REFERENCES
 from data_pipeline.assembly.assembly_logic import (
     init_report,
@@ -141,8 +145,14 @@ def orchestrate_event_assembly(run_context: RunContext, report: Dict) -> bool:
 
     except Exception as e:
         log_error(f"Unexpected error processing event assembly: {e}", report)
+        report["status"] = "failed"
+        return False
 
     finally:
+        if "lf_derived" in locals():
+            del lf_derived  # type: ignore
+        if "lf_freezed" in locals():
+            del lf_freezed
         force_gc()
 
     return True
@@ -178,21 +188,26 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
         report[table] = {"dim_reference": False, "export": False}
         tracker = report[table]
 
-        lf_raw = None
-        df_dim = None
-
         try:
-            lf_raw = load_historical_table(
-                run_context.contracted_path,
-                table,
-                log_info=lambda msg: loaded_data(msg, report),
-            )
+            # Switch between local and gcp IO
+            if run_context.bq_project_id == "PROJECT_ID_NOT_DETECTED":
+                lf_raw = load_historical_data(
+                    base_path=run_context.storage_contracted_path, table_name=table
+                )
+            else:
+                lf_raw = scan_gcs_uris_from_bigquery(
+                    project_id=run_context.bq_project_id,
+                    dataset_id=run_context.bq_dataset_id,
+                    table_id=table,
+                    log_info=lambda msg: loaded_data(msg, report),
+                )
 
             if lf_raw is None:
                 return False
 
             primary_key = config.get("primary_key", [])
             require_col = config.get("required_column", [])
+            dtypes = config.get("dtypes", {})
 
             ok, df_dim = task_wrapper(
                 report=report,
@@ -202,6 +217,7 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
                 lf=lf_raw,
                 primary_key=primary_key,
                 req_column=require_col,
+                dtypes=dtypes,
             )
 
             if not ok:
@@ -222,21 +238,21 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
             log_info(f"Export dimension reference:{table} successfully", report)
 
         except FileNotFoundError as e:
-            log_error(f"File not found for dimension table {table}: {str(e)}", report)
+            log_error(f"File not found for dimension table {table}: {e}", report)
 
             return False
 
         except Exception as e:
             log_error(
-                f"Unexpected error processing dimension table {table}: {str(e)}", report
+                f"Unexpected error processing dimension table {table}: {e}", report
             )
             return False
 
         finally:
-            if lf_raw is not None:
-                del lf_raw
-            if df_dim is not None:
-                del df_dim
+            if "lf_raw" in locals():
+                del lf_raw  # type: ignore
+            if "df_dim" in locals():
+                del df_dim  # type: ignore
             gc.collect()
 
     return True

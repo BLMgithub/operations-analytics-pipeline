@@ -4,6 +4,7 @@
 
 import polars as pl
 import pytest
+from pathlib import Path
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.assembly.assembly_logic import log_info, log_error, init_report
 from data_pipeline.assembly.assembly_executor import (
@@ -26,7 +27,9 @@ def valid_orders_df():
     return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
+            "order_id_int": [1, 2],
             "customer_id": ["cos1", "cos2"],
+            "customer_id_int": [101, 102],
             "order_status": ["delivered", "delivered"],
             "order_purchase_timestamp": [
                 "2023-01-02 09:00:00",
@@ -54,7 +57,11 @@ def valid_orders_df():
             pl.col("order_delivered_timestamp").str.strptime(
                 pl.Datetime, "%Y-%m-%d %H:%M:%S"
             ),
-            pl.col("order_estimated_delivery_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("order_estimated_delivery_date")
+            .str.strptime(pl.Date, "%Y-%m-%d")
+            .cast(pl.Datetime),
+            pl.col("order_id_int").cast(pl.UInt32),
+            pl.col("customer_id_int").cast(pl.UInt32),
         ]
     )
 
@@ -64,11 +71,20 @@ def valid_order_items_df():
     return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
+            "order_id_int": [1, 2],
             "product_id": ["prod1", "prod2"],
+            "product_id_int": [201, 202],
             "seller_id": ["seller1", "seller2"],
+            "seller_id_int": [301, 302],
             "price": [12.3, 45.6],
             "shipping_charges": [1.23, 4.56],
         }
+    ).with_columns(
+        [
+            pl.col("order_id_int").cast(pl.UInt32),
+            pl.col("product_id_int").cast(pl.UInt32),
+            pl.col("seller_id_int").cast(pl.UInt32),
+        ]
     )
 
 
@@ -77,12 +93,13 @@ def valid_payments_df():
     return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
+            "order_id_int": [1, 2],
             "payment_sequential": [1, 2],
             "payment_type": ["credit", "cash"],
             "payment_installments": [4, 5],
             "payment_value": [100.1, 50.2],
         }
-    )
+    ).with_columns([pl.col("order_id_int").cast(pl.UInt32)])
 
 
 @pytest.fixture
@@ -90,6 +107,7 @@ def valid_customers_df():
     return pl.DataFrame(
         {
             "customer_id": ["cos1", "cos2"],
+            "customer_id_int": [101, 102],
             "customer_state": ["SP", "RJ"],
             "customer_city": ["Sao Paulo", "Rio"],
             "customer_segment": ["A", "B"],
@@ -98,6 +116,7 @@ def valid_customers_df():
     ).with_columns(
         [
             pl.col("account_creation_date").str.strptime(pl.Datetime, "%Y-%m-%d"),
+            pl.col("customer_id_int").cast(pl.UInt32),
         ]
     )
 
@@ -107,6 +126,7 @@ def valid_products_df():
     return pl.DataFrame(
         {
             "product_id": ["prod1", "prod2"],
+            "product_id_int": [201, 202],
             "product_category_name": ["tech", "home"],
             "product_weight_g": [100.0, 500.0],
             "product_length_cm": [10.0, 20.0],
@@ -115,7 +135,7 @@ def valid_products_df():
             "product_fragility_index": ["Low", "High"],
             "supplier_tier": ["Gold", "Silver"],
         }
-    )
+    ).with_columns([pl.col("product_id_int").cast(pl.UInt32)])
 
 
 @pytest.fixture
@@ -123,10 +143,14 @@ def valid_derived_df():
     df = pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
+            "order_id_int": [1, 2],
             "seller_id": ["seller1", "seller2"],
+            "seller_id_int": [301, 302],
             "customer_id": ["cos1", "cos2"],
+            "customer_id_int": [101, 102],
             "order_revenue": [100.1, 50.2],
             "product_id": ["prod1", "prod2"],
+            "product_id_int": [201, 202],
             "order_status": ["delivered", "delivered"],
             "order_purchase_timestamp": [
                 "2023-01-02 09:00:00",
@@ -163,7 +187,11 @@ def valid_derived_df():
                 pl.Datetime, "%Y-%m-%d %H:%M:%S"
             ),
             pl.col("order_estimated_delivery_date").str.strptime(pl.Date, "%Y-%m-%d"),
-            pl.col("order_date").str.strptime(pl.Date, "%Y-%m-%d"),
+            pl.col("order_date").str.strptime(pl.Date, "%Y-%m-%d").cast(pl.Datetime),
+            pl.col("order_id_int").cast(pl.UInt32),
+            pl.col("customer_id_int").cast(pl.UInt32),
+            pl.col("product_id_int").cast(pl.UInt32),
+            pl.col("seller_id_int").cast(pl.UInt32),
         ]
     )
     return df
@@ -213,7 +241,7 @@ def test_merge_data_preserve_grain(
         result = result.collect()
 
     assert result.height == 2
-    assert result.select(pl.col("order_id").is_duplicated().any()).item() == False
+    assert result.select(pl.col("order_id_int").is_duplicated().any()).item() == False
     assert "order_revenue" in result.columns
 
 
@@ -226,22 +254,28 @@ def test_merge_data_aggregates_duplicates(
         [valid_order_items_df, valid_order_items_df.slice(0, 1)]
     )
 
-    assert duplicated_items_df["order_id"][0] == duplicated_items_df["order_id"][2]
+    assert (
+        duplicated_items_df["order_id_int"][0] == duplicated_items_df["order_id_int"][2]
+    )
 
     result = merge_data(
         {
             "df_orders": valid_orders_df,
             "df_order_items": duplicated_items_df,
             "df_payments": pl.DataFrame(
-                {"order_id": ["o1", "o2"], "payment_value": [10.0, 20.0]}
-            ),
+                {
+                    "order_id": ["o1", "o2"],
+                    "order_id_int": [1, 2],
+                    "payment_value": [10.0, 20.0],
+                }
+            ).with_columns([pl.col("order_id_int").cast(pl.UInt32)]),
         }
     )
     if isinstance(result, pl.LazyFrame):
         result = result.collect()
 
     assert result.height == 2
-    assert result.select(pl.col("order_id").is_duplicated().any()).item() == False
+    assert result.select(pl.col("order_id_int").is_duplicated().any()).item() == False
 
 
 # =============================================================================
@@ -277,7 +311,7 @@ def test_freeze_schema_enforces_strict_schema_success(valid_derived_df):
 
 
 def test_freeze_schema_fails_on_missing_column(valid_derived_df):
-    missing_required_column = valid_derived_df.drop("seller_id")
+    missing_required_column = valid_derived_df.drop("seller_id_int")
     with pytest.raises(RuntimeError, match="missing required columns"):
         result = freeze_schema(missing_required_column)
         if isinstance(result, pl.LazyFrame):
@@ -298,18 +332,20 @@ def test_assemble_data_success(
     valid_products_df,
 ):
     run_id = "20230101T120000"
-    run_context = RunContext.create(base=tmp_path, run_id=run_id)
+    run_context = RunContext.create(
+        base=tmp_path, run_id=run_id, storage=tmp_path / "storage"
+    )
     run_context.initialize_directories()
+    storage_contracted_path = Path(run_context.storage_contracted_path)
+    storage_contracted_path.mkdir(parents=True, exist_ok=True)
 
-    valid_orders_df.write_parquet(run_context.contracted_path / "df_orders.parquet")
+    valid_orders_df.write_parquet(storage_contracted_path / "df_orders.parquet")
     valid_order_items_df.write_parquet(
-        run_context.contracted_path / "df_order_items.parquet"
+        storage_contracted_path / "df_order_items.parquet"
     )
-    valid_payments_df.write_parquet(run_context.contracted_path / "df_payments.parquet")
-    valid_customers_df.write_parquet(
-        run_context.contracted_path / "df_customers.parquet"
-    )
-    valid_products_df.write_parquet(run_context.contracted_path / "df_products.parquet")
+    valid_payments_df.write_parquet(storage_contracted_path / "df_payments.parquet")
+    valid_customers_df.write_parquet(storage_contracted_path / "df_customers.parquet")
+    valid_products_df.write_parquet(storage_contracted_path / "df_products.parquet")
 
     report = assemble_events(run_context)
 
@@ -327,16 +363,20 @@ def test_assemble_data_fails_on_missing_column(
     valid_payments_df,
 ):
     run_id = "20230101T120000"
-    run_context = RunContext.create(base=tmp_path, run_id=run_id)
-    run_context.initialize_directories()
-
-    invalid_order_items_df = valid_order_items_df.drop("seller_id")
-
-    valid_orders_df.write_parquet(run_context.contracted_path / "df_orders.parquet")
-    invalid_order_items_df.write_parquet(
-        run_context.contracted_path / "df_order_items.parquet"
+    run_context = RunContext.create(
+        base=tmp_path, run_id=run_id, storage=tmp_path / "storage"
     )
-    valid_payments_df.write_parquet(run_context.contracted_path / "df_payments.parquet")
+    run_context.initialize_directories()
+    storage_contracted_path = Path(run_context.storage_contracted_path)
+    storage_contracted_path.mkdir(parents=True, exist_ok=True)
+
+    invalid_order_items_df = valid_order_items_df.drop("seller_id_int")
+
+    valid_orders_df.write_parquet(storage_contracted_path / "df_orders.parquet")
+    invalid_order_items_df.write_parquet(
+        storage_contracted_path / "df_order_items.parquet"
+    )
+    valid_payments_df.write_parquet(storage_contracted_path / "df_payments.parquet")
 
     report = assemble_events(run_context)
 
@@ -344,7 +384,7 @@ def test_assemble_data_fails_on_missing_column(
     assert report["assembled_events"]["freeze_schema"] == False
     assert any(
         "missing required columns" in error
-        or 'unable to find column "seller_id"' in error
+        or 'unable to find column "seller_id_int"' in error
         for error in report["errors"]
     )
 
@@ -356,15 +396,16 @@ def test_assemble_data_fails_on_missing_column(
 
 def test_dimension_references_uniqueness():
     df = pl.DataFrame({"id": ["1", "1", "2"], "val": ["a", "a", "b"]})
+    df_dtypes = {"id": pl.String, "val": pl.String}
 
-    result = dimension_references(df.lazy(), ["id"], ["id", "val"])
+    result = dimension_references(df.lazy(), ["id"], ["id", "val"], df_dtypes)
     if isinstance(result, pl.LazyFrame):
         result = result.collect()
     assert result.height == 2
 
     df_conflict = pl.DataFrame({"id": ["1", "1"], "val": ["a", "b"]})
 
-    result = dimension_references(df_conflict.lazy(), ["id"], ["id", "val"])
+    result = dimension_references(df_conflict.lazy(), ["id"], ["id", "val"], df_dtypes)
     if isinstance(result, pl.LazyFrame):
         result = result.collect()
     assert result.height == 1

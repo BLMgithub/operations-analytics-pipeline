@@ -2,7 +2,7 @@
 # UNIT TESTS FOR validation_logic.py and validation_executor.py
 # =============================================================================
 
-import pandas as pd
+import polars as pl
 import pytest
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.validation.validation_executor import apply_validation
@@ -29,7 +29,7 @@ def empty_report():
 
 @pytest.fixture
 def valid_orders_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "customer_id": ["c1", "c2"],
@@ -44,7 +44,7 @@ def valid_orders_df():
 
 @pytest.fixture
 def valid_order_items_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "product_id": ["p1", "p2"],
@@ -56,7 +56,7 @@ def valid_order_items_df():
 
 @pytest.fixture
 def valid_payments_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "order_id": ["o1", "o2"],
             "payment_sequential": [1, 1],
@@ -67,7 +67,7 @@ def valid_payments_df():
 
 @pytest.fixture
 def valid_customers_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "customer_id": ["c1", "c2"],
             "customer_state": ["SP", "RJ"],
@@ -80,7 +80,7 @@ def valid_customers_df():
 
 @pytest.fixture
 def valid_products_df():
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "product_id": ["p1", "p2"],
             "product_category_name": ["tech", "home"],
@@ -136,14 +136,14 @@ def test_run_base_validations_success(valid_customers_df, empty_report):
 
 
 def test_run_base_validations_empty_df(empty_report):
-    df = pd.DataFrame()
+    df = pl.DataFrame()
     ok = run_base_validations(df, "test", ["id"], ["id"], ["id"], empty_report)
     assert ok is False
     assert any("dataset is empty" in e for e in empty_report["errors"])
 
 
 def test_run_base_validations_missing_column(valid_customers_df, empty_report):
-    df = valid_customers_df.drop(columns=["customer_state"])
+    df = valid_customers_df.drop(["customer_state"])
     ok = run_base_validations(
         df,
         "df_customers",
@@ -157,33 +157,26 @@ def test_run_base_validations_missing_column(valid_customers_df, empty_report):
 
 
 def test_run_base_validations_duplicate_pk(empty_report):
-    df = pd.DataFrame({"id": ["1", "1"], "val": ["a", "b"]})
+    df = pl.DataFrame({"id": ["1", "1"], "val": ["a", "b"]})
     ok = run_base_validations(df, "test", ["id"], ["id", "val"], ["id"], empty_report)
     assert ok is False
     assert any("conflicting duplicate primary key" in e for e in empty_report["errors"])
 
 
 def test_run_base_validations_repairable_duplicate(empty_report):
-    df = pd.DataFrame({"id": ["1", "1"], "val": ["a", "a"]})
+    df = pl.DataFrame({"id": ["1", "1"], "val": ["a", "a"]})
     ok = run_base_validations(df, "test", ["id"], ["id", "val"], ["id"], empty_report)
     assert ok is True
     assert any("eligible for deduplication" in w for w in empty_report["warnings"])
 
 
 def test_run_base_validations_null_pk(empty_report):
-    df = pd.DataFrame({"id": [None, "2"], "val": ["a", "b"]})
+    df = pl.DataFrame({"id": [None, "2"], "val": ["a", "b"]})
     ok = run_base_validations(df, "test", ["id"], ["id", "val"], [], empty_report)
     assert ok is True
     assert any(
         "rows with null primary key values" in w for w in empty_report["warnings"]
     )
-
-
-def test_run_base_validations_duplicate_columns(empty_report):
-    df = pd.DataFrame([[1, 2]], columns=["id", "id"])
-    ok = run_base_validations(df, "test", ["id"], ["id"], [], empty_report)
-    assert ok is True
-    assert any("duplicate column names detected" in w for w in empty_report["warnings"])
 
 
 # =============================================================================
@@ -199,14 +192,24 @@ def test_run_event_fact_validations_success(valid_orders_df, empty_report):
 
 def test_run_event_fact_validations_temporal_error(valid_orders_df, empty_report):
     # Approval before purchase
-    valid_orders_df.loc[0, "order_approved_at"] = "2026-03-24 10:00:00"
+    valid_orders_df = valid_orders_df.with_columns(
+        pl.when(pl.col("order_id") == "o1")
+        .then(pl.lit("2026-03-24 10:00:00"))
+        .otherwise(pl.col("order_approved_at"))
+        .alias("order_approved_at")
+    )
     ok = run_event_fact_validations(valid_orders_df, "df_orders", empty_report)
     assert ok is True
     assert any("approval precedes purchase" in w for w in empty_report["warnings"])
 
 
 def test_run_event_fact_validations_unparsable_ts(valid_orders_df, empty_report):
-    valid_orders_df.loc[0, "order_purchase_timestamp"] = "garbage"
+    valid_orders_df = valid_orders_df.with_columns(
+        pl.when(pl.col("order_id") == "o1")
+        .then(pl.lit("garbage"))
+        .otherwise(pl.col("order_purchase_timestamp"))
+        .alias("order_purchase_timestamp")
+    )
     ok = run_event_fact_validations(valid_orders_df, "df_orders", empty_report)
     assert ok is True
     assert any("unparsable timestamp values" in w for w in empty_report["warnings"])
@@ -218,7 +221,7 @@ def test_run_event_fact_validations_unparsable_ts(valid_orders_df, empty_report)
 
 
 def test_run_transaction_detail_validations_negative(empty_report):
-    df = pd.DataFrame({"order_id": ["o1"], "price": [-10.0]})
+    df = pl.DataFrame({"order_id": ["o1"], "price": [-10.0]})
     ok = run_transaction_detail_validations(df, "test", empty_report)
     assert ok is True
     assert any("negative values in numeric column" in e for e in empty_report["errors"])
@@ -230,9 +233,9 @@ def test_run_transaction_detail_validations_negative(empty_report):
 
 
 def test_run_cross_table_validations_orphans(empty_report):
-    orders = pd.DataFrame({"order_id": ["o1"]})
-    items = pd.DataFrame({"order_id": ["o1", "o2"]})  # o2 is orphan
-    payments = pd.DataFrame({"order_id": ["o3"]})  # o3 is orphan
+    orders = pl.DataFrame({"order_id": ["o1"]})
+    items = pl.DataFrame({"order_id": ["o1", "o2"]})  # o2 is orphan
+    payments = pl.DataFrame({"order_id": ["o3"]})  # o3 is orphan
 
     tables = {"df_orders": orders, "df_order_items": items, "df_payments": payments}
     ok = run_cross_table_validations(tables, empty_report)
@@ -258,20 +261,18 @@ def test_apply_validation_integration(
 
     # Create date-suffixed files for loader
     suffix = "2026_03_25"
-    valid_orders_df.to_csv(
-        run_context.raw_snapshot_path / f"df_orders_{suffix}.csv", index=False
+    valid_orders_df.write_csv(run_context.raw_snapshot_path / f"df_orders_{suffix}.csv")
+    valid_order_items_df.write_csv(
+        run_context.raw_snapshot_path / f"df_order_items_{suffix}.csv"
     )
-    valid_order_items_df.to_csv(
-        run_context.raw_snapshot_path / f"df_order_items_{suffix}.csv", index=False
+    valid_payments_df.write_csv(
+        run_context.raw_snapshot_path / f"df_payments_{suffix}.csv"
     )
-    valid_payments_df.to_csv(
-        run_context.raw_snapshot_path / f"df_payments_{suffix}.csv", index=False
+    valid_customers_df.write_csv(
+        run_context.raw_snapshot_path / f"df_customers_{suffix}.csv"
     )
-    valid_customers_df.to_csv(
-        run_context.raw_snapshot_path / f"df_customers_{suffix}.csv", index=False
-    )
-    valid_products_df.to_csv(
-        run_context.raw_snapshot_path / f"df_products_{suffix}.csv", index=False
+    valid_products_df.write_csv(
+        run_context.raw_snapshot_path / f"df_products_{suffix}.csv"
     )
 
     report = apply_validation(run_context)

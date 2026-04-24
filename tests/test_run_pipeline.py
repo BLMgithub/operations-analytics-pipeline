@@ -185,12 +185,9 @@ def test_main_fails_on_assemble_events(monkeypatch, tmp_path):
         lambda *a, **k: ({}, set(), set()),
     )
 
-    # Mocking upload/download contracted directory to avoid real I/O
+    # Mocking upload/download I/O
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.upload_contracted_directory", lambda *_: None
-    )
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.download_contracted_datasets", lambda *_: None
     )
 
     monkeypatch.setattr(
@@ -258,12 +255,9 @@ def test_main_fails_on_build_semantic_layer(monkeypatch, tmp_path):
         lambda *a, **k: ({}, set(), set()),
     )
 
-    # Mocking upload/download contracted directory to avoid real I/O
+    # Mocking upload/download I/O
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.upload_contracted_directory", lambda *_: None
-    )
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.download_contracted_datasets", lambda *_: None
     )
 
     monkeypatch.setattr(
@@ -341,12 +335,9 @@ def test_main_fails_on_execute_publish_lifecycle(monkeypatch, tmp_path):
         lambda *a, **k: ({}, set(), set()),
     )
 
-    # Mocking upload/download contracted directory to avoid real I/O
+    # Mocking upload/download I/O
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.upload_contracted_directory", lambda *_: None
-    )
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.download_contracted_datasets", lambda *_: None
     )
 
     monkeypatch.setattr(
@@ -434,12 +425,9 @@ def test_main_success(monkeypatch, tmp_path):
         lambda *a, **k: ({}, set(), set()),
     )
 
-    # Mocking upload/download contracted directory to avoid real I/O
+    # Mocking upload/download I/O
     monkeypatch.setattr(
         "data_pipeline.run_pipeline.upload_contracted_directory", lambda *_: None
-    )
-    monkeypatch.setattr(
-        "data_pipeline.run_pipeline.download_contracted_datasets", lambda *_: None
     )
 
     monkeypatch.setattr(

@@ -1,4 +1,6 @@
-pandas==2.1.4
 polars==1.39.0
 pyarrow==19.0.0
 google-cloud-storage
+google-cloud-bigquery>=3.0.0
+google-cloud-bigquery-storage>=2.36.0
+psutil==5.9.8

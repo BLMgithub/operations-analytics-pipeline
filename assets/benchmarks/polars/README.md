@@ -2,7 +2,7 @@
 
 This section details the methodology used to capture the memory metrics in the [`GCP Stress-Test Metrics (Scaling Efficiency)`](/README.md#gcp-stress-test-metrics-scaling-efficiency)
 
-The telemetry logger below was added **temporarily** to the orchestrator for a specific benchmarking run. This code was pushed directly to the Cloud Artifact Registry as an experimental image tag (`mem-record`) and is not part of the permanent git repository history.
+The telemetry logger below was added to the orchestrator for a specific benchmarking run. 
 
 ```python
 import psutil
@@ -28,11 +28,15 @@ finally:
     stop_event.set()
     logger_thread.join()
 ```
-Since `psutil` requires C-extensions to compile, the **Dockerfile** was modified to include the necessary build tools and the package itself. This allowed for benchmarking without altering the project's permanent `requirements.txt`.
+Since `psutil` requires C-extensions to compile, the **Dockerfile** was modified to include the necessary build tools and the package itself. This allowed for benchmarking without altering the project's permanent [`requirements.txt`](/data_pipeline/requirements.txt).
 
 ```docker
 FROM python:3.11-slim
 ENV # Environments...
+
+WORKDIR /app
+
+COPY data_pipeline/requirements.txt .
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -42,7 +46,8 @@ RUN apt-get update && \
     apt-get purge -y --auto-remove gcc python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+COPY data_pipeline/ ./data_pipeline/
+ENV PYTHONPATH=/app
 
 # the rest of docker code...
 

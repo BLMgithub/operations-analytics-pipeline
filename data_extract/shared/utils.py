@@ -14,7 +14,6 @@ from typing import Any, TypeAlias
 from datetime import datetime as dt
 from zoneinfo import ZoneInfo
 
-
 GoogleDriveService: TypeAlias = Any
 
 # ------------------------------------------------------------

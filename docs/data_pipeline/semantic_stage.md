@@ -13,7 +13,7 @@
 
 **Purpose**
 
-Transforms the unified Gold-layer "Order-Grain" event table into entity-centric Fact and Dimension modules. It performs temporal aggregations, calculates long-term performance metrics, and organizes data into a schema optimized for time-series and cohort analysis.
+Transforms the unified Gold-layer "Order-Grain" event table into entity-centric Fact and Dimension modules. It performs temporal aggregations, calculates long-term performance metrics, and leverages the Primitive Integer Pipeline for efficient, high-fidelity analytical modeling.
 
 **Invariants**
 
@@ -49,9 +49,9 @@ The **Executor** coordinates the semantic build through a modular, registry-driv
 
 ## **Optimization & Memory Invariants**
 
-* **Local Categorical Aggregation:** To optimize memory during grouping operations, builders cast high-cardinality grouping keys (e.g., `seller_id`) to `pl.Categorical` locally. This creates a temporary, localized dictionary optimized specifically for that module's aggregation plan, bypassing the need for a persistent global string cache.
-* **Narrow Aggregation Payloads:** All aggregation results (counts, sums) are immediately cast to `Int16` or `Float32` within the `agg()` block. This prevents the materialized result set from expanding in memory.
-* **Schema Hand-off:** While the building process uses `Categorical` for performance, the final output is cast back to `pl.String()` via the registry/freezing process. This ensures downstream compatibility with BI tools and prevents "dictionary leakage" between pipeline runs.
+* **Integer Key Optimization:** To optimize memory during grouping operations, builders leverage pre-mapped `UInt32/UInt64` keys (e.g., `seller_id_int`). This maintains a constant memory profile during non-blocking aggregation and eliminates the overhead of string-based hash tables.
+* **Narrow Aggregation Payloads:** All aggregation results (counts, sums) are immediately downcast to `Int16` or `Float32` within the `agg()` block. This prevents the materialized result set from expanding in memory.
+* **Metric Downcasting:** Durations, counts, and years are forced to `Int16` (2 bytes) to minimize row width during streaming.
 * **Streaming Export:** `sink_parquet()` is utilized for all fact and dimension table exports, enabling zero-copy streaming of results directly from the query plan to storage.
 
 ## **Boundaries**
@@ -61,7 +61,7 @@ The **Executor** coordinates the semantic build through a modular, registry-driv
 | Perform multi-level aggregations (Sum, Mean, Count). | Filter "bad" data (handled in Validation/Contract stages). |
 | Derive entity-level attributes (e.g., `first_order_date`). | Resolve order-item join cardinality. |
 | Align all temporal metrics to the ISO Week grain. | Mutate the "Assembled Events" source. |
-| Enforce technical schemas and data types lazily. | Manage the physical publish/pointer logic. |
+| Utilize Integer-Key grouping for constant memory. | Manage the physical publish/pointer logic. |
 | Organize data into Fact/Dimension modules via streaming. | Perform cross-module joins. |
 
 ## **Failure & Severity Model**

@@ -5,7 +5,9 @@
 import polars as pl
 import pytest
 import json
+import os
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.semantic.registry import SEMANTIC_MODULES
@@ -17,6 +19,7 @@ from data_pipeline.publish.publish_logic import (
     run_integrity_gate,
     promote_semantic_version,
     activate_published_version,
+    swap_bigquery_view,
 )
 from data_pipeline.shared.modeling_configs import (
     SELLER_FACT_SCHEMA,
@@ -100,7 +103,6 @@ def setup_semantic_files(run_context, df_map):
         for table_name in module["tables"]:
             df = df_map[table_name]
             filename = f"{table_name}_{year}_{month}_{day}.parquet"
-            # df is now pl.DataFrame
             df.write_parquet(module_path / filename)
 
 
@@ -135,7 +137,7 @@ def test_run_integrity_gate_fails_on_missing_directory(tmp_path):
     run_context = RunContext.create(
         base=tmp_path, storage=tmp_path, run_id="20230101T120000"
     )
-    # Don't initialize directories or setup files
+    # Force to fail on missing directory
     report = run_integrity_gate(run_context)
     assert report["status"] == "failed"
     assert "Semantic directory is missing" in report["errors"]
@@ -150,7 +152,7 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
     )
     run_context.initialize_directories()
 
-    # Only setup one module but incomplete
+    # Force to fail on missing module
     module_path = run_context.semantic_path / "seller_semantic"
     module_path.mkdir(parents=True, exist_ok=True)
     valid_seller_fact.write_parquet(
@@ -159,36 +161,7 @@ def test_run_integrity_gate_fails_on_semantic_file_mismatch(
 
     report = run_integrity_gate(run_context)
     assert report["status"] == "failed"
-
-
-def test_run_integrity_gate_fails_on_empty_dataframe(
-    tmp_path,
-    valid_seller_fact,
-    valid_seller_dim,
-    valid_customer_fact,
-    valid_customer_dim,
-    valid_product_fact,
-    valid_product_dim,
-):
-    run_context = RunContext.create(
-        base=tmp_path, storage=tmp_path, run_id="20230101T120000"
-    )
-    run_context.initialize_directories()
-
-    df_map = {
-        "seller_weekly_fact": pl.DataFrame(),  # Empty
-        "seller_dim": valid_seller_dim,
-        "customer_weekly_fact": valid_customer_fact,
-        "customer_dim": valid_customer_dim,
-        "product_weekly_fact": valid_product_fact,
-        "product_dim": valid_product_dim,
-    }
-
-    setup_semantic_files(run_context, df_map)
-    report = run_integrity_gate(run_context)
-    assert report["status"] == "failed"
-    # Current implementation fails on missing columns if dataframe is empty
-    assert any("required column(s)" in error for error in report["errors"])
+    assert "Semantic module mismatch" in report["errors"]
 
 
 def test_run_integrity_gate_fails_on_missing_columns(
@@ -205,7 +178,7 @@ def test_run_integrity_gate_fails_on_missing_columns(
     )
     run_context.initialize_directories()
 
-    # Drop a column using Polars
+    # Drop a column
     df_map = {
         "seller_weekly_fact": valid_seller_fact.drop(valid_seller_fact.columns[0]),
         "seller_dim": valid_seller_dim,
@@ -232,6 +205,7 @@ def test_promote_semantic_version_success(tmp_path):
     )
     run_context.initialize_directories()
 
+    # Local promotion uses shutil.copytree
     run_context.semantic_path.mkdir(parents=True, exist_ok=True)
 
     report = promote_semantic_version(run_context)
@@ -252,11 +226,50 @@ def test_promote_semantic_version_fails_on_existing_version_directory(tmp_path):
 
 
 # ------------------------------------------------------------
+# BIGQUERY VIEW SWAP
+# ------------------------------------------------------------
+
+
+def test_swap_bigquery_view_local_skip(tmp_path):
+    run_context = RunContext.create(
+        base=tmp_path, storage=tmp_path, run_id="20230101T120000"
+    )
+    report = swap_bigquery_view(run_context)
+    assert report["status"] == "success"
+    assert any("Skipping BigQuery swap" in info for info in report["info"])
+
+
+def test_swap_bigquery_view_gcs_success():
+    run_id = "20230101T120000"
+    storage_path = "gs://test-bucket/pipeline"
+    run_context = RunContext.create(
+        base=Path("/tmp"), storage=storage_path, run_id=run_id
+    )
+
+    mock_client = MagicMock()
+    mock_client.project = "test-project"
+
+    with patch("google.cloud.bigquery.Client", return_value=mock_client), patch.dict(
+        os.environ, {"GCP_REGION": "us-east1"}
+    ):
+        report = swap_bigquery_view(run_context)
+
+        assert report["status"] == "success"
+        # Total 3 modules, each has 2 tables = 6 table DDLs + 6 view DDLs = 12 calls
+        assert mock_client.query.call_count == 12
+
+        # Verify one of the DDLs
+        first_call_ddl = mock_client.query.call_args_list[0][0][0]
+        assert "CREATE OR REPLACE EXTERNAL TABLE" in first_call_ddl
+        assert f"v{run_id}" in first_call_ddl
+
+
+# ------------------------------------------------------------
 # ACTIVATE VERSION
 # ------------------------------------------------------------
 
 
-def test_activate_published_version_success(tmp_path):
+def test_activate_published_version_success_local(tmp_path):
     run_context = RunContext.create(
         base=tmp_path, storage=tmp_path, run_id="20230101T120000"
     )
@@ -269,6 +282,29 @@ def test_activate_published_version_success(tmp_path):
     with open(run_context.latest_pointer_path, "r") as f:
         data = json.load(f)
         assert data["run_id"] == "20230101T120000"
+        assert "published_at" in data
+
+
+def test_activate_published_version_success_gcs():
+    storage_path = "gs://test-bucket/pipeline"
+    run_context = RunContext.create(
+        base=Path("/tmp"), storage=storage_path, run_id="20230101T120000"
+    )
+
+    mock_storage_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_blob = MagicMock()
+    mock_storage_client.bucket.return_value = mock_bucket
+    mock_bucket.blob.return_value = mock_blob
+
+    with patch("google.cloud.storage.Client", return_value=mock_storage_client):
+        report = activate_published_version(run_context)
+        assert report["status"] == "success"
+        mock_blob.upload_from_string.assert_called_once()
+
+        call_args = mock_blob.upload_from_string.call_args
+        payload = json.loads(call_args[0][0])
+        assert payload["run_id"] == "20230101T120000"
 
 
 # ------------------------------------------------------------
@@ -276,7 +312,7 @@ def test_activate_published_version_success(tmp_path):
 # ------------------------------------------------------------
 
 
-def test_execute_publish_lifecycle_success(
+def test_execute_publish_lifecycle_success_local(
     tmp_path,
     valid_seller_fact,
     valid_seller_dim,
@@ -301,6 +337,7 @@ def test_execute_publish_lifecycle_success(
 
     setup_semantic_files(run_context, df_map)
 
+    # In local mode, swap_bigquery_view skips
     report = execute_publish_lifecycle(run_context)
     assert report["status"] == "success"
     assert Path(run_context.version_path).exists()

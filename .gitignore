@@ -7,9 +7,11 @@ __pycache__/
 runtime/
 /data/raw
 data/published/
+data/id_mapping/
 data/run_artifact
 data/contracted/
 assets/benchmarks/benchmark.py
+docker-compose.benchmark.yml
 
 # local editor configs
 pyrightconfig.json

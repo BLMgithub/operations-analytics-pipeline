@@ -2,6 +2,8 @@
 # Table configuration for Validation and Contract stage
 # =============================================================================
 
+import polars as pl
+
 TABLE_CONFIG = {
     "df_orders": {
         "role": "event_fact",
@@ -22,13 +24,13 @@ TABLE_CONFIG = {
             "order_purchase_timestamp",
         ],
         "dtypes": {
-            "order_id": "string",
-            "customer_id": "string",
-            "order_status": "category",
-            "order_purchase_timestamp": "datetime64[ns]",
-            "order_approved_at": "datetime64[ns]",
-            "order_delivered_timestamp": "datetime64[ns]",
-            "order_estimated_delivery_date": "datetime64[ns]",
+            "order_id": pl.String,
+            "customer_id": pl.String,
+            "order_status": pl.Categorical,
+            "order_purchase_timestamp": pl.Datetime(time_unit="us"),
+            "order_approved_at": pl.Datetime(time_unit="us"),
+            "order_delivered_timestamp": pl.Datetime(time_unit="us"),
+            "order_estimated_delivery_date": pl.Datetime(time_unit="us"),
         },
     },
     "df_order_items": {
@@ -47,10 +49,10 @@ TABLE_CONFIG = {
             "price",
         ],
         "dtypes": {
-            "order_id": "string",
-            "product_id": "string",
-            "seller_id": "string",
-            "price": "float32",
+            "order_id": pl.String,
+            "product_id": pl.String,
+            "seller_id": pl.String,
+            "price": pl.Float32,
         },
     },
     "df_customers": {
@@ -71,11 +73,11 @@ TABLE_CONFIG = {
             "account_creation_date",
         ],
         "dtypes": {
-            "customer_id": "string",
-            "customer_state": "category",
-            "customer_city": "category",
-            "customer_segment": "category",
-            "account_creation_date": "datetime64[ns]",
+            "customer_id": pl.String,
+            "customer_state": pl.Categorical,
+            "customer_city": pl.Categorical,
+            "customer_segment": pl.Categorical,
+            "account_creation_date": pl.Datetime(time_unit="us"),
         },
     },
     "df_payments": {
@@ -90,8 +92,8 @@ TABLE_CONFIG = {
             "payment_value",
         ],
         "dtypes": {
-            "order_id": "string",
-            "payment_value": "float32",
+            "order_id": pl.String,
+            "payment_value": pl.Float32,
         },
     },
     "df_products": {
@@ -118,14 +120,14 @@ TABLE_CONFIG = {
             "supplier_tier",
         ],
         "dtypes": {
-            "product_id": "string",
-            "product_category_name": "category",
-            "product_length_cm": "float32",
-            "product_height_cm": "float32",
-            "product_width_cm": "float32",
-            "product_fragility_index": "category",
-            "product_weight_g": "float32",
-            "supplier_tier": "category",
+            "product_id": pl.String,
+            "product_category_name": pl.Categorical,
+            "product_length_cm": pl.Float32,
+            "product_height_cm": pl.Float32,
+            "product_width_cm": pl.Float32,
+            "product_fragility_index": pl.Categorical,
+            "product_weight_g": pl.Float32,
+            "supplier_tier": pl.Categorical,
         },
     },
 }

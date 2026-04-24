@@ -12,11 +12,11 @@ from data_pipeline.shared.table_configs import TABLE_CONFIG
 
 # Assemble events enforced schema and dtypes
 ASSEMBLE_SCHEMA = [
-    "order_id",
+    "order_id_int",
     "order_revenue",
-    "seller_id",
-    "customer_id",
-    "product_id",
+    "seller_id_int",
+    "customer_id_int",
+    "product_id_int",
     "order_status",
     "order_purchase_timestamp",
     "order_approved_at",
@@ -29,20 +29,20 @@ ASSEMBLE_SCHEMA = [
 ]
 
 ASSEMBLE_DTYPES: Mapping[str, pl.DataType] = {
-    "order_id": pl.String(),
+    "order_id_int": pl.UInt32(),
     "order_revenue": pl.Float32(),
-    "seller_id": pl.String(),
-    "customer_id": pl.String(),
-    "product_id": pl.String(),
+    "seller_id_int": pl.UInt32(),
+    "customer_id_int": pl.UInt32(),
+    "product_id_int": pl.UInt32(),
     "order_status": pl.Categorical(),
-    "order_purchase_timestamp": pl.Datetime(),
-    "order_approved_at": pl.Datetime(),
-    "order_delivered_timestamp": pl.Datetime(),
+    "order_purchase_timestamp": pl.Datetime(time_unit="us"),
+    "order_approved_at": pl.Datetime(time_unit="us"),
+    "order_delivered_timestamp": pl.Datetime(time_unit="us"),
     "lead_time_days": pl.Int16(),
     "approval_lag_days": pl.Int16(),
     "delivery_delay_days": pl.Int16(),
-    "order_date": pl.Datetime(),
-    "order_year_week": pl.String(),
+    "order_date": pl.Datetime(time_unit="us"),
+    "order_year_week": pl.Categorical(),
 }
 
 # ------------------------------------------------------------
@@ -52,8 +52,11 @@ ASSEMBLE_DTYPES: Mapping[str, pl.DataType] = {
 dimension_table = ["df_customers", "df_products"]
 DIMENSION_REFERENCES = {
     table: {
-        "primary_key": TABLE_CONFIG[table]["primary_key"],
-        "required_column": TABLE_CONFIG[table]["required_column"],
+        "primary_key": [key + "_int" for key in TABLE_CONFIG[table]["primary_key"]],
+        "required_column": [
+            key + "_int" if "_id" in key else key
+            for key in TABLE_CONFIG[table]["required_column"]
+        ],
     }
     for table in dimension_table
 }
@@ -65,21 +68,21 @@ DIMENSION_REFERENCES = {
 
 # Seller dimension enforced schema and dtypes
 SELLER_DIM_SCHEMA = [
-    "seller_id",
+    "seller_id_int",
     "first_order_date",
     "first_order_year_week",
 ]
 
 SELLER_DIM_DTYPES: Mapping[str, pl.DataType] = {
-    "seller_id": pl.String(),
-    "first_order_date": pl.Datetime(),
-    "first_order_year_week": pl.String(),
+    "seller_id_int": pl.UInt32(),
+    "first_order_date": pl.Datetime(time_unit="us"),
+    "first_order_year_week": pl.Categorical(),
 }
 
 
 # Seller Facts enforced schema and dtypes
 SELLER_FACT_SCHEMA = [
-    "seller_id",
+    "seller_id_int",
     "order_year_week",
     "week_start_date",
     "weekly_order_count",
@@ -94,9 +97,9 @@ SELLER_FACT_SCHEMA = [
 ]
 
 SELLER_FACT_DTYPES: Mapping[str, pl.DataType] = {
-    "seller_id": pl.String(),
-    "order_year_week": pl.String(),
-    "week_start_date": pl.Datetime(),
+    "seller_id_int": pl.UInt32(),
+    "order_year_week": pl.Categorical(),
+    "week_start_date": pl.Datetime(time_unit="us"),
     "weekly_order_count": pl.Int16(),
     "weekly_delivered_orders": pl.Int16(),
     "weekly_cancelled_orders": pl.Int16(),
@@ -115,7 +118,7 @@ SELLER_FACT_DTYPES: Mapping[str, pl.DataType] = {
 
 # Customer Dimension and dtypes
 CUSTOMER_DIM_SCHEMA = [
-    "customer_id",
+    "customer_id_int",
     "customer_state",
     "customer_city",
     "customer_segment",
@@ -123,16 +126,16 @@ CUSTOMER_DIM_SCHEMA = [
 ]
 
 CUSTOMER_DIM_DTYPES: Mapping[str, pl.DataType] = {
-    "customer_id": pl.String(),
+    "customer_id_int": pl.UInt32(),
     "customer_state": pl.Categorical(),
     "customer_city": pl.Categorical(),
     "customer_segment": pl.Categorical(),
-    "account_creation_date": pl.Datetime(),
+    "account_creation_date": pl.Datetime(time_unit="us"),
 }
 
 # Customer Fact and dtypes
 CUSTOMER_FACT_SCHEMA = [
-    "customer_id",
+    "customer_id_int",
     "order_year_week",
     "week_start_date",
     "weekly_order_count",
@@ -147,9 +150,9 @@ CUSTOMER_FACT_SCHEMA = [
 ]
 
 CUSTOMER_FACT_DTYPES: Mapping[str, pl.DataType] = {
-    "customer_id": pl.String(),
-    "order_year_week": pl.String(),
-    "week_start_date": pl.Datetime(),
+    "customer_id_int": pl.UInt32(),
+    "order_year_week": pl.Categorical(),
+    "week_start_date": pl.Datetime(time_unit="us"),
     "weekly_order_count": pl.Int16(),
     "weekly_delivered_orders": pl.Int16(),
     "weekly_cancelled_orders": pl.Int16(),
@@ -168,7 +171,7 @@ CUSTOMER_FACT_DTYPES: Mapping[str, pl.DataType] = {
 
 # Product Dim and dtypes
 PRODUCT_DIM_SCHEMA = [
-    "product_id",
+    "product_id_int",
     "product_category_name",
     "product_length_cm",
     "product_height_cm",
@@ -179,7 +182,7 @@ PRODUCT_DIM_SCHEMA = [
 ]
 
 PRODUCT_DIM_DTYPES: Mapping[str, pl.DataType] = {
-    "product_id": pl.String(),
+    "product_id_int": pl.UInt32(),
     "product_category_name": pl.Categorical(),
     "product_length_cm": pl.Float32(),
     "product_height_cm": pl.Float32(),
@@ -192,7 +195,7 @@ PRODUCT_DIM_DTYPES: Mapping[str, pl.DataType] = {
 
 # Product Fact and dtypes
 PRODUCT_FACT_SCHEMA = [
-    "product_id",
+    "product_id_int",
     "order_year_week",
     "week_start_date",
     "weekly_order_count",
@@ -208,9 +211,9 @@ PRODUCT_FACT_SCHEMA = [
 
 
 PRODUCT_FACT_DTYPES: Mapping[str, pl.DataType] = {
-    "product_id": pl.String(),
-    "order_year_week": pl.String(),
-    "week_start_date": pl.Datetime(),
+    "product_id_int": pl.UInt32(),
+    "order_year_week": pl.Categorical(),
+    "week_start_date": pl.Datetime(time_unit="us"),
     "weekly_order_count": pl.Int16(),
     "weekly_delivered_orders": pl.Int16(),
     "weekly_cancelled_orders": pl.Int16(),

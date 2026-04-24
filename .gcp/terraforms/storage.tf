@@ -46,3 +46,4 @@ resource "google_storage_bucket" "ops_pipeline_bucket" {
     }
   }
 }
+

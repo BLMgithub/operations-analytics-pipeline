@@ -16,9 +16,11 @@ This project solves that challenge by delivering a highly resilient, event-drive
 
 To eliminate the risk of cross-run data contamination and memory bloat, the pipeline employs a defensive state-management strategy where local compute environments are strictly temporary:
 * **Stateless Orchestration:** Every execution operates within an isolated, deterministic `run_id` workspace that is aggressively purged post-run.
+* **Primitive Integer Pipeline:** Optimizes high-volume joins by mapping 36-byte UUID strings to 4-byte UInt32 surrogates, reducing join-key memory overhead by ~16x and protecting the serverless memory ceiling.
 * **Cloud Sync & Purge:** After processing data into the Silver layer, the system syncs the output to Cloud Storage, purging the local environment.
-* **Historical Context Pull:** It then safely re-downloads the complete historical state for Gold layer aggregation, ensuring every run builds analytical models in a clean, untainted environment.
+* **Historical Context Pull:** It then safely streams the complete historical state for Gold layer aggregation, ensuring every run builds analytical models in a clean, untainted environment.
 * **Linear Gating:** Stages are strictly gated; failure at any tier (Ingestion, Contract, or Assembly) prevents downstream processing and ensures partial data is never promoted.
+* **BigQuery Atomic Swap:** Final semantic models are delivered via Authorized Views that atomically swap pointers to new data versions, providing zero-downtime connectivity for BI consumers.
 * **Resource-Optimized Compute:** Leverages a highly efficient lazy-evaluation engine to process large-scale datasets seamlessly within the strict memory constraints of serverless environments.
 
 ### Event-Driven Cloud Infrastructure
@@ -42,23 +44,35 @@ The pipeline does not just move data; it actively defends the analytical layer f
 
 **Silver (The Contract Layer)**
 * **Philosophy (Subtractive-Only Logic):** The pipeline never guesses, imputes, or "repairs" bad data. If a record violates the contract, it is explicitly dropped, and the loss is logged in the telemetry report.
+* **Primitive Integer Pipeline:** Optimizes downstream high-volume joins by mapping 36-byte UUID strings to 4-byte UInt32 surrogates, reducing join-key memory overhead by ~16x and ensuring the pipeline stays within serverless memory constraints.
 * **Role-Based Rules:** Tables are classified by role (`event_fact`, `transaction_detail`, `entity_reference`) and subjected to specific registry rules (e.g., deduplication, non-null assertions).
 * **Referential Integrity (Cascade Cleanup):** The pipeline tracks invalidated parent IDs (e.g., malformed `order_id`s) and propagates them downstream. If an order is dropped, all associated child records (like line items) are cascade-dropped to prevent orphan data from polluting joins.
 * **Schema Freeze:** Output files are strictly cast to predefined data types and projected to contain only approved columns before being written to Cloud Storage.
 
 **Gold (The Semantic Layer)**
-* **Purpose:** Business-ready Fact and Dimension tables modeled for entity-centric and cohort analysis (Customers, Sellers, Products).
-* **Strict Grain Enforcement:**
-    * **Temporal:** All fact tables are deterministically aligned to an ISO-Week grain (`W-MON`).
-    * **Entity:** The engine validates that Dimension tables contain exactly one row per `Entity_ID`, and Fact tables contain exactly one row per `(Entity_ID, order_year_week)`.
-* **Lineage Integrity:** The Semantic builder aggressively checks that the assembled data belongs to a single `run_id`. Cross-run data contamination triggers a terminal failure, preventing poisoned data from ever reaching production.
+* **Purpose:** High-fidelity analytical modeling through advanced integration and entity-centric aggregation. The Gold layer is partitioned into two distinct stages to maintain a strict separation between integration logic and business metrics.
+* **Stage I: Assembly (The Analytical Backbone)**
+    * **Role:** Integrates normalized relational tables (`orders`, `items`, `payments`) into a unified, analytical "Event" dataset.
+    * **Invariants:** Guaranteed 1:1 grain per `order_id_int`. It performs analytical flattening and calculates fulfillment lead times while enforcing referential integrity (e.g., purging orders without items).
+    * **Dimension Extraction:** Generates strictly deduplicated reference tables for Customers and Products, ensuring a single source of truth for entity attributes.
+* **Stage II: Semantic (The Business Logic Engine)**
+    * **Role:** Transforms unified order-grain events into specialized Fact and Dimension modules tailored for cohort and entity-centric analysis (Sellers, Customers, Products).
+    * **Strict Grain Enforcement:**
+        * **Temporal:** All fact tables are deterministically aligned to an ISO-Week grain (`W-MON`).
+        * **Entity-Fact:** Strictly 1 row per `(Entity_ID, order_year_week)`.
+        * **Entity-Dim:** Strictly 1 row per `Entity_ID`.
+* **Technical Invariants:**
+    * **Integer Key Optimization:** Both stages leverage the Primitive Integer Pipeline for grouping and joins, maintaining a constant memory profile by avoiding string-based hash tables.
+    * **Schema Freeze:** Both stages output files are strictly cast to predefined data types and projected to contain only approved columns
 
 ### Validation Gates & Deployment Integrity
 
 * **Dual-Pass Validation Strategy:**
     * **Initial Validation (Raw Gate):** The orchestrator evaluates raw snapshots. At this stage, `warnings` (like duplicate IDs or nulls) are tolerated and passed down to the Contract Stage for subtractive cleanup. Only fatal structural errors abort the run.
     * **Post-Contract Revalidation (Silver Gate):** After contract rules are applied, the system re-runs validation. In this phase, `warnings` are escalated to fatal. Because the contract stage guarantees a clean schema, any remaining warnings trigger a terminal `RuntimeError`, halting the pipeline immediately to prevent downstream corruption.
-* **Atomic Publishing Lifecycle:** The pipeline protects the Gold layer by writing intermediate analytical models to isolated temporary directories during computation. Only when *all* semantic modules successfully finish processing does the system execute an atomic publish via `latest_version.json` pointer updates, guaranteeing that partial or incomplete data is never served to dashboards.
+* **Atomic Publishing Lifecycle:** 
+    * **Staged Execution (Isolated Buffer):** The pipeline protects the Gold layer by writing intermediate analytical models to isolated temporary directories during computation. Only when all semantic modules successfully finish processing does the system execute a multi-system atomic publish.
+    * **Atomic Deployment (BigQuery View Swap):** This multi-system swap redirects BigQuery Authorized Views to fresh External Tables and updates the latest_version.json manifest, ensuring BI tools like Power BI always query complete, validated datasets without downtime.
 * **Comprehensive Telemetry:**
     * **End-to-End Traceability:** A single `run_id` is propagated through all raw snapshots, metadata logs, and published artifacts to provide absolute lineage tracking.
     * **Resilient Logging:** Even in the event of a fatal crash, the orchestrator's `finally` block guarantees that partial logs and stage reports are synced back to cloud storage before the local workspace is purged, ensuring debuggability.
@@ -69,58 +83,58 @@ The pipeline is explicitly engineered to process massive datasets within the rig
 
 ### GCP Stress-Test Metrics (Scaling Efficiency)
 
-| 18M Snapshot (8GiB / 2 vCPU) | 36M Snapshot (16GiB / 4 vCPU) |
-| :---: | :---: |
-| ![engine-performance-8gb](/assets/screenshots/engine-performance-8gb-2cpu.png) | ![engine-performance-16gb](/assets/screenshots/engine-performance-16gb-4cpu.png) |
+| 40M Snapshot (8GB / 4 vCPU) with mounted temporary disk|
+| :---: |
+| ![engine-performance-8gb](/assets/screenshots/engine-performance-8gb-4cpu.png) |
 
-> Benchmark data: [`18m_stats_log.csv`](/assets/benchmarks/polars/18mrows_dataset_stats_log.csv) and [`36m_stats_log.csv`](/assets/benchmarks/polars/36mrows_dataset_stats_log.csv)
+> Benchmark data: [`40m_stats_log.csv`](/assets/benchmarks/polars/40mrows_dataset_stats_log.csv)
+> Dataset : [`Dataset Information`](/data/README.md)
 
-| Metric | 18M Rows (8GB / 2 vCPU) | 36M Rows (16GB / 4 vCPU) |
-| :--- | :--- | :--- |
-| **Throughput (Processing)** | ~116,000 Rows / Second | ~220,000 Rows / Second |
-| **Total Runtime (Wall-Clock)** | 02m 34s | 02m 43s |
-| **Memory Tax (Fixed)** | ~1.5 GiB | ~1.5 GiB |
-| **Effective Data Headroom** | ~6.5 GiB | ~14.5 GiB |
+| Metric | Data | 
+|:---|:---|
+| Dataset |~40 Million Rows / ~5.3 GB Parquet|
+| Provision Spec | 8 GB RAM / 4 vCPU |
+| Efficiency (Processing) | ~307k Rows / Second |
+| Total Runtime (Wall-Clock) | 130 Seconds |
 
-*   **Near-Linear Performance Scaling:** Doubling the compute and dataset size results in only a 9-second increase in wall-clock time, effectively doubling the throughput as the Polars engine saturates the additional vCPUs.
-*   **Predictable Capacity:** Identifying the "Memory Tax" (OS/IO overhead) allows for precise resource governance, ensuring jobs never fail due to unpredictable Signal 9 (OOM) events.
+*   **Maximized Memory Density:** Enabled by the **Primitive Integer Pipeline**, mapping 36-byte UUID strings to 4-byte UInt32 keys shrunk join-key memory overhead by ~16x. This allowed a ~5.34GB analytical model (40M rows) to easily process entirely within the 8GB RAM limit
+*   **Near-Linear Performance Scaling:** The Polars engine saturates the available vCPUs, yielding ultra-high throughput (307k rows/s) during streaming execution.
 *   **Zero-Idle Economics:** 100% serverless execution ensures zero billable time during idle periods, significantly reducing the Total Cost of Ownership (TCO) compared to dedicated cluster solutions.
 
 ### Cost Efficiency & Free-Tier
 
-The pipeline's processing speed allows for a full analytical rebuild of 36M rows while remaining comfortably within the **GCP Cloud Run Free Tier** (180k vCPU-sec, 360k GiB-sec). This means a small-to-mid-sized organization can run this production-grade pipeline multiple times a day with **zero compute costs.**
+The pipeline's processing speed allows for a full analytical rebuild of 40M rows while remaining comfortably within the **GCP Cloud Run Free Tier** (180k vCPU-sec, 360k GB-sec). This means a small-to-mid-sized organization can run this production-grade pipeline multiple times a day with **zero compute costs.**
 
-| Compute Provision | Dataset | vCPU-Seconds / Run | GiB-Seconds / Run | Monthly Free-Tier Runs |
+| Compute Provision | Dataset | vCPU-Seconds / Run | GB-Seconds / Run | Monthly Free-Tier Runs |
 | :--- | :--- | :--- | :--- | :--- |
-| **8 GiB / 2 vCPU** | ~18m rows | 308 | 1,232 | **~292 Runs / Month** |
-| **16 GiB / 4 vCPU** | ~36m rows | 652 | 2,608 | **~138 Runs / Month** |
-| **32 GiB / 8 vCPU** | ~72m rows | 1,304 | 5,216 | **~69 Runs / Month** |
+| **8 GB / 4 vCPU** | ~40M rows | 520 | 1,040 | **~346 Runs / Month** |
+| **16 GB / 6 vCPU** | ~80M rows | 1040 | 2,773 | **~129 Runs / Month** |
+| **32 GB / 8 vCPU** | ~160M rows | 2,080 | 8,320 | **~43 Runs / Month** |
 
-> *Calculations based on verified benchmarks. Even at the highest 32GiB tier, the pipeline can execute a full state rebuild twice daily for $0*
+> *Calculations based on verified benchmarks. Even at the highest 32GB tier, the pipeline can execute a full state rebuild over 43 times per month for $0 within the GCP free tier.*
 
 ### Measurement Methodology
 *   **Performance Profiling:** Captured from production telemetry via the pipeline's native `run_duration` metadata, calculating the precise delta between `started_at` and `completed_at` timestamps.
-*   **Memory Utilization:** Monitored via an integrated [`psutil.virtual_memory().used`](/assets/benchmarks/polars/README.md) profiling implementation to verify the actual resource footprint and confirm the physical ceiling for 8GiB/16GiB provision.
-*   **Throughput Efficiency:** Leverages Polars streaming evaluation to maintain high throughput and minimize CPU idle time during GCS I/O, providing a significant performance advantage over traditional eager-loading engines.
+*   **Memory Utilization:** Monitored via an integrated [`psutil.virtual_memory().used`](/assets/benchmarks/polars/README.md) profiling implementation to verify the actual resource footprint and confirm the physical ceiling for 8GB provision.
 
 ### **Scaling Roadmap: From Serverless to Enterprise Lakehouse**
 
 To ensure the architecture survives the transition from millions to billions of rows, the pipeline is designed to evolve across three validated scaling paths. This roadmap prioritizes cost-efficiency at low volumes while providing a clear architectural pivot for enterprise-scale workloads.
 
-#### **Stage 1: Temporal Sharding (Vertical Efficiency)**
-*   **Strategy:** Refactor the `Assemble` stage to iterate through **yearly batch partitions** while `Semantic` stage to **streams output directly** to a GCS staging location.
-*   **Publish Evolution:** Moves to a **Partitioned Atomic Swap**. Yearly shards are streamed directly to a staged GCS version prefix. The `Integrity Gate` validates cloud-side completeness before the `latest_version.json` pointer is updated.
-*   **Trade-off:** **Latency vs. Memory.** Significantly increases total wall-clock time due to repeated I/O cycles, but allows 32GiB instances to process 100M+ rows by isolating join-intensity to specific temporal shards.
+#### **Stage 1: Incremental Delta Propagation (Efficiency Pivot)**
+*   **Strategy:** Transition from a "Full Rebuild" batch model to a **Stateless Delta Propagation** model using Polars' streaming engine to process only newly arrived `.parquet` deltas.
+*   **Optimization:** Leverages the existing BigQuery View infrastructure to perform "Last-Mile" merging of incremental updates with the historical state, eliminating the need for redundant full-table re-reads.
+*   **Trade-off:** **Operational Complexity vs. Compute Cost.** Reduces GCS I/O and CPU time by 80-90% for daily runs, but requires more sophisticated state-tracking in the metadata layer.
 
-#### **Stage 2: Incremental Delta Architecture (Event-Driven)**
-*   **Strategy:** Transition from a "Full Rebuild" batch model to a **Stateless Delta Propagation** model, processing only active deltas.
-*   **Publish Evolution:** Moves to a **Checkpoint-based Commit**. Folder-based versioning is replaced by an atomic merge into the Gold layer. The "Pointer" evolves into a metadata watermark signifying data freshness to downstream consumers.
-*   **Trade-off:** **Simplicity vs. Scale.** Eliminates memory constraints and reduces runtime costs, but sacrifices easy "point-in-time" folder recovery. Requires "Last-Mile" deduplication logic (e.g., SQL Views) for downstream consumers.
+#### **Stage 2: Event-Driven Real-Time Streaming (Latency Pivot)**
+*   **Strategy:** Integrate GCS Pub/Sub notifications with **Cloud Run streaming sinks** to trigger sub-minute validation and assembly.
+*   **Architecture:** Moves from a daily batch schedule to a continuous ingestion loop where each file upload triggers a micro-run. The BigQuery Atomic View Swap acts as the transactional boundary, ensuring dashboards always see the latest validated data without waiting for the daily window.
+*   **Trade-off:** **Responsiveness vs. Throughput.** Provides near real-time insights but increases the frequency of small I/O operations.
 
 #### **Stage 3: BigQuery "Engine-as-a-Service" (The Enterprise Pivot)**
-*   **Strategy:** Offload the `Assemble` and `Semantic` compute layers entirely to **BigQuery (ELT Pattern)**.
-*   **Publish Evolution:** Moves to a **Atomic View Redirection**. The Python "Gatekeeper" builds semantics in a staging dataset and runs SQL-driven integrity checks. Publication is achieved by an atomic swap of a BigQuery Authorized View, replacing the file-based pointer system.
-*   **Trade-off:** **Cost vs. Capability.** Provides an infinite scaling ceiling and removes all local infrastructure bounds, but introduces higher cost-per-query overhead and requires transitioning from local Parquet files to managed cloud storage.
+*   **Strategy:** Offload the high-volume `Assemble` and `Semantic` compute layers entirely to **BigQuery (ELT Pattern)** using SQL-driven logic.
+*   **Scalability:** Provides an infinite scaling ceiling (Petabyte-scale) and removes all local infrastructure bounds, while the Python pipeline acts as an "Air-Traffic Controller" managing integrity gates and view swaps.
+*   **Trade-off:** **Scalability vs. Vendor Lock-in.** Simplifies the compute environment but moves the primary cost from serverless RAM to BigQuery slot usage.
 
 
 ## Observability & Alerting
@@ -135,7 +149,7 @@ The custom Cloud Monitoring dashboard tracks granular operational metrics to pro
 **Pipeline Job Metrics:**
 1. **Workflow Execution Traffic:** Measures the volume of finished pipeline runs.
 2. **Execution Status Ratio:** Tracks the count of `SUCCESS` vs. `FAILED` runs to monitor overall reliability.
-3. **Memory Allocation Bottlenecks:** Plots the actual Cloud Run memory usage against a hardcoded 4GB horizontal threshold to visualize proximity to OOM exhaustion.
+3. **Memory Allocation Bottlenecks:** Plots the actual Cloud Run memory usage against a hardcoded 8GB horizontal threshold to visualize proximity to OOM exhaustion.
 
 **Extractor Job Metrics:**
 1. **Drive Extractor Latency:** Tracks the billable instance time of the extractor job (the most accurate proxy for API usage cost, as the extractor utilizes the Drive API continuously during runtime).

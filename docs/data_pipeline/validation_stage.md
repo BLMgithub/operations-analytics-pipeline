@@ -12,10 +12,11 @@
 
 **Purpose** 
 
-Evaluates raw datasets against declared structural contracts before any mutation or transformation occurs. It prevents "garbage-in" scenarios by detecting schema violations, structural inconsistencies, and referential integrity issues that would compromise downstream aggregation.
+Evaluates raw datasets against declared structural contracts before any mutation or transformation occurs. It prevents "garbage-in" scenarios by detecting schema violations, structural inconsistencies, and referential integrity issues. In the modern Polars-native architecture, it also serves as a verification gate for the 'Normalize-at-Source' I/O strategy.
 
 **Invariants** 
 * **Non-Mutation Guarantee:** This stage is strictly read-only. It never modifies values, removes rows, or casts types in the source data.
+* **Resolution Verification:** Asserts that all timestamps are pre-normalized to microsecond (us) resolution by the I/O layer.
 * **Severity Hierarchy:** 
     * `errors`: Fatal structural violations (e.g., missing columns, duplicate PKs).
     * `warnings`: Admissible integrity issues (e.g., orphan records, chronological anomalies).
@@ -37,10 +38,10 @@ The **Executor** coordinates the validation lifecycle through the following dete
 2.  **Data Loading:** Attempts to load each table as a DataFrame. If a table is missing, an `error` is logged to the report.
 3.  **Base Validation:** Dispatches the DataFrame to `run_base_validations` to check for:
     * Presence of required columns.
-    * Uniqueness of Primary Keys and column names.
+    * Uniqueness of Primary Keys and column names using Polars-native expressions.
     * Compliance with non-nullable constraints.
 4.  **Role-Specific Dispatch:** If base validations pass, the executor applies specialized rules:
-    * `event_fact`: Triggers `run_event_fact_validations` (temporal chronology).
+    * `event_fact`: Triggers `run_event_fact_validations` (temporal chronology and microsecond resolution verification).
     * `transaction_detail`: Triggers `run_transaction_detail_validations` (numeric range checks).
 5.  **Cross-Table Integrity:** Once all tables are processed individually, `run_cross_table_validations` evaluates Foreign Key relationships (e.g., ensuring all Items belong to an existing Order).
 
@@ -50,10 +51,10 @@ The **Executor** coordinates the validation lifecycle through the following dete
 | :--- | :--- |
 | Load logical tables from the snapshot zone. | Remove rows or filter data. |
 | Detect schema and primary key violations. | Correct or impute missing values. |
-| Evaluate timestamp validity and chronological ordering. | Deduplicate records (delegated to Contract stage). |
-| Detect numeric anomalies (negative prices/lags). | Perform data type casting. |
-| Evaluate cross-table referential integrity (orphans). | Halt the pipeline (Decision owned by global orchestrator). |
-| Produce structured, machine-readable reports. | Modify the physical state of the data lake. |
+| Verify microsecond (us) timestamp resolution. | Deduplicate records (delegated to Contract stage). |
+| Evaluate temporal chronology using clean Polars syntax. | Perform data type casting. |
+| Detect numeric anomalies (negative prices/lags). | Mutate the physical state of the data lake. |
+| Produce structured, machine-readable reports. | Halt the pipeline (Decision owned by global orchestrator). |
 
 ## **Failure & Severity Model**
 

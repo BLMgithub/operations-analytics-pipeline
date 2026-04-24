@@ -2,11 +2,10 @@
 # Semantic Modeling Stage Executor
 # =============================================================================
 
-import gc
 import polars as pl
 from typing import Dict
 from data_pipeline.shared.run_context import RunContext
-from data_pipeline.shared.loader_exporter import load_historical_table, export_file
+from data_pipeline.shared.loader_exporter import load_assembled_data, export_file
 from data_pipeline.semantic.registry import SEMANTIC_MODULES
 from data_pipeline.assembly.assembly_logic import (
     init_report,
@@ -15,6 +14,7 @@ from data_pipeline.assembly.assembly_logic import (
     loaded_data,
     task_wrapper,
 )
+from data_pipeline.assembly.assembly_executor import force_gc
 
 
 def validate_and_freeze_table(lf: pl.LazyFrame, table: dict) -> pl.LazyFrame:
@@ -118,7 +118,7 @@ def orchestrate_module(
         print(f"[INFO] Module {module_name}: build_stage completed successfully.")
 
     except Exception as e:
-        log_error(f"Step build_stage failed: {str(e)}", report)
+        log_error(f"Step build_stage failed: {e}", report)
         report["status"] = "failed"
 
         return False
@@ -168,18 +168,24 @@ def orchestrate_module(
 
         except FileExistsError as e:
             log_error(f"Unexpected table returned {table_name}: {e}", report)
+            report["status"] = "failed"
+            return False
 
         except Exception as e:
             log_error(f"Unexpected error processing {table_name}: {e}", report)
+            report["status"] = "failed"
+            return False
 
         finally:
             if "lf_frozen" in locals():
                 del lf_frozen
-            del df_table
-            gc.collect()
+            if "df_table" in locals():
+                del df_table
+            force_gc()
 
-    del builder_output
-    gc.collect()
+    if "builder_output" in locals():
+        del builder_output
+    force_gc()
 
     log_info(f"Export Module: {module_name} Successfully", report)
     module_report[module_name]["export"] = True
@@ -214,7 +220,7 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
     report = init_report()
     report["modules"] = {}
 
-    df_assembled = load_historical_table(
+    df_assembled = load_assembled_data(
         base_path=run_context.assembled_path,
         table_name="assembled_events",
         log_info=lambda msg: loaded_data(msg, report),
@@ -238,7 +244,8 @@ def build_semantic_layer(run_context: RunContext) -> Dict:
             report["status"] = "failed"
             return report
 
-    del df_assembled
-    gc.collect()
+    if "df_assembled" in locals():
+        del df_assembled
+    force_gc()
 
     return report
