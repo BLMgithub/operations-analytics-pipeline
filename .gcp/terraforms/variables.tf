@@ -4,7 +4,7 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "The Default GCP region"
+  description = "The Project GCP region"
   type        = string
   default     = "us-east1"
 }
@@ -23,4 +23,9 @@ variable "alert_email_map" {
   type        = map(string)
   description = "List of emails to receive pipeline alerts"
   sensitive   = true
+}
+
+variable "bq_dataset_id" {
+  description = "BigQuery dataset containing externalized GCS tables"
+  type        = string
 }

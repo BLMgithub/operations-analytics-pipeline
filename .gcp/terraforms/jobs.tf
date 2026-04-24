@@ -16,17 +16,25 @@ resource "google_cloud_run_v2_job" "pipeline" {
 
         resources {
           limits = {
-            cpu    = "2"
+            cpu    = "4"
             memory = "8Gi"
           }
         }
         env {
           name  = "POLARS_MAX_THREADS"
-          value = "2"
+          value = "4"
         }
         env {
           name  = "GCP_REGION"
           value = var.region
+        }
+        env {
+          name  = "BQ_DATASET_ID"
+          value = var.bq_dataset_id
+        }
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
         }
 
         volume_mounts {

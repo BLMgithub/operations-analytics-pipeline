@@ -95,9 +95,12 @@ This project implements **Zero Trust** via Workload Identity Federation and gran
 | Name | Type | Sensitive | Description |
 | :--- | :--- | :--- | :--- |
 | `project_id` | `string` | No | Target Google Cloud Project ID. |
+| `region` | `string` | No | The Project GCP region. |
 | `environment` | `string` | No | Deployment environment (dev, prod). |
 | `github_repo` | `string` | No | Format: `owner/repository`. |
+| `bq_dataset_id` | `string` | No | BigQuery dataset containing externalized GCS tables. |
 | `alert_email_map` | `map` | **Yes** | Monitoring notification recipients. |
+
 
 ## State Management
 State is managed remotely in GCS to ensure consistency and locking.

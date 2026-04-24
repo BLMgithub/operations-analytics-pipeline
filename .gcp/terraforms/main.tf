@@ -32,6 +32,7 @@ locals {
     "iamcredentials.googleapis.com",
     "drive.googleapis.com",
     "bigquery.googleapis.com",
+    "bigqueryconnection.googleapis.com",
   ]
 }
 

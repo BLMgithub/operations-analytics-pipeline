@@ -10,6 +10,7 @@ tzdata
 # pipeline
 polars==1.39.0
 pyarrow==19.0.0
+# duckdb==1.5.2
 google-cloud-storage
 google-cloud-bigquery>=3.0.0
 google-cloud-bigquery-storage>=2.36.0

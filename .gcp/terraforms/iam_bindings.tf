@@ -25,7 +25,8 @@ locals {
     "roles/logging.configWriter",            # Required for log-based alert policies
     "roles/iam.serviceAccountAdmin",         # Manage Alert policies in monitoring.tf
     "roles/iam.admin",                       # Manage Iam roles
-    "roles/bigquery.admin"                   # Manage BigQuery datasets and views
+    "roles/bigquery.admin",                  # Manage BigQuery datasets and views
+    "roles/serviceusage.serviceUsageAdmin",  # Manage APIs
   ]
 }
 
