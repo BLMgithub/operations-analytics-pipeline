@@ -147,6 +147,10 @@ def orchestrate_event_assembly(run_context: RunContext, report: Dict) -> bool:
         log_error(f"Unexpected error processing event assembly: {e}", report)
 
     finally:
+        if "lf_derived" in locals():
+            del lf_derived  # type: ignore
+        if "lf_freezed" in locals():
+            del lf_freezed
         force_gc()
 
     return True
@@ -181,9 +185,6 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
 
         report[table] = {"dim_reference": False, "export": False}
         tracker = report[table]
-
-        lf_raw = None
-        df_dim = None
 
         try:
             # Switch between local and gcp IO
@@ -246,10 +247,10 @@ def orchestrate_dimension_refs(run_context: RunContext, report: Dict) -> bool:
             return False
 
         finally:
-            if lf_raw is not None:
-                del lf_raw
-            if df_dim is not None:
-                del df_dim
+            if "lf_raw" in locals():
+                del lf_raw  # type: ignore
+            if "df_dim" in locals():
+                del df_dim  # type: ignore
             gc.collect()
 
     return True

@@ -184,7 +184,7 @@ def load_historical_data(
     if not all_files:
         raise FileNotFoundError(f"No Parquet files found for {table_name}")
 
-    lfs = [normalize_datetimes(pl.scan_parquet(f)) for f in all_files]
+    lfs = [normalize_datetimes(pl.scan_parquet(file)) for file in all_files]
     lf_unified = pl.concat(lfs, how="vertical_relaxed")
 
     if log_info:

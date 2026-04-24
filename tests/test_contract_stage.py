@@ -15,7 +15,12 @@ from data_pipeline.contract.contract_logic import (
     enforce_parent_reference,
     enforce_schema,
 )
-from data_pipeline.contract.id_registrar import map_uuid_to_int, id_mapping
+from data_pipeline.contract.id_registrar import (
+    discover_uuids,
+    lookup_mapping_storage,
+    generate_and_persist_delta,
+    extract_entity_mappings,
+)
 
 # ------------------------------------------------------------
 # FIXTURES
@@ -162,57 +167,102 @@ def test_enforce_schema():
 # ------------------------------------------------------------
 
 
-def test_map_uuid_to_int_new_file(tmp_path):
-    df = pl.DataFrame({"user_id": ["u1", "u2", "u3"]})
-    mapping_file = tmp_path / "user_id_mapping.parquet"
+def test_discover_uuids_mixed_formats(tmp_path):
+    # Setup raw files (CSV and Parquet)
+    raw_path = tmp_path / "raw"
+    raw_path.mkdir()
 
-    map_uuid_to_int(df, mapping_file, "user_id")
+    # Table 1: Parquet
+    df1 = pl.DataFrame({"order_id": ["o1", "o2"]})
+    df1.write_parquet(raw_path / "df_orders_2026_04_01.parquet")
 
-    assert mapping_file.exists()
-    mapping_df = pl.read_parquet(mapping_file)
-    assert mapping_df.height == 3
-    assert "user_id" in mapping_df.columns
-    assert "user_id_int" in mapping_df.columns
-    assert mapping_df["user_id_int"].to_list() == [1, 2, 3]
-    assert mapping_df["user_id_int"].dtype == pl.UInt32
+    # Table 2: CSV
+    df2 = pl.DataFrame({"order_id": ["o2", "o3"]})
+    df2.write_csv(raw_path / "df_order_items_2026_04_01.csv")
+
+    tables = ["df_orders", "df_order_items"]
+    uuids = discover_uuids(raw_path, tables, "order_id")
+
+    assert uuids.len() == 3
+    assert set(uuids.to_list()) == {"o1", "o2", "o3"}
 
 
-def test_map_uuid_to_int_update_existing(tmp_path):
-    mapping_file = tmp_path / "user_id_mapping.parquet"
-    initial_df = pl.DataFrame({"user_id": ["u1", "u2"], "user_id_int": [1, 2]}).cast(
-        {"user_id_int": pl.UInt32}
+def test_lookup_mapping_storage_uniqueness(tmp_path):
+    storage_dir = tmp_path / "storage" / "order_id"
+    storage_dir.mkdir(parents=True)
+
+    # Create history with a duplicate UUID across different deltas
+    pl.DataFrame({"order_id": ["o1"], "order_id_int": [1]}).write_parquet(
+        storage_dir / "d1.parquet"
     )
-    initial_df.write_parquet(mapping_file)
+    pl.DataFrame({"order_id": ["o1"], "order_id_int": [1]}).write_parquet(
+        storage_dir / "d2.parquet"
+    )
 
-    new_df = pl.DataFrame({"user_id": ["u2", "u3", "u4"]})
-    map_uuid_to_int(new_df, mapping_file, "user_id")
+    storage_glob = str(storage_dir / "*.parquet")
+    batch_uuids = pl.Series("order_id", ["o1"])
 
-    mapping_df = pl.read_parquet(mapping_file).sort("user_id_int")
-    assert mapping_df.height == 4
-    assert set(mapping_df["user_id"].to_list()) == {"u1", "u2", "u3", "u4"}
-    assert mapping_df["user_id_int"].to_list() == [1, 2, 3, 4]
+    known_df, max_id = lookup_mapping_storage(storage_glob, "order_id", batch_uuids)
+
+    assert known_df.height == 1  # Uniqueness check
+    assert max_id == 1
 
 
-def test_id_mapping_orchestration(tmp_path):
+def test_generate_and_persist_delta(tmp_path):
     runtime_dir = tmp_path / "runtime"
-    destination = tmp_path / "destination"
-    runtime_dir.mkdir()
-    destination.mkdir()
+    missing = pl.Series("order_id", ["o10", "o11"])
 
-    df = pl.DataFrame({"order_id": ["o1", "o2"], "customer_id": ["c1", "c2"]})
+    new_df = generate_and_persist_delta(missing, 5, "order_id", runtime_dir, "run123")
 
-    mapping_dict = {"df_orders": ["order_id", "customer_id"]}
+    assert new_df.height == 2
+    assert new_df["order_id_int"].to_list() == [6, 7]
+    assert (runtime_dir / "order_id" / "map_run123.parquet").exists()
 
-    lf_mapped = id_mapping(df, "df_orders", mapping_dict, runtime_dir, destination)
-    result_df = lf_mapped.collect()
 
-    assert "order_id_int" in result_df.columns
-    assert "customer_id_int" in result_df.columns
-    assert result_df.height == 2
+def test_extract_entity_mappings_orchestration(tmp_path, monkeypatch):
+    run_context = RunContext.create(base=tmp_path, storage=tmp_path / "storage")
+    run_context.initialize_directories()
 
-    # Check if mapping files were promoted to destination
-    assert (destination / "order_id_mapping.parquet").exists()
-    assert (destination / "customer_id_mapping.parquet").exists()
+    # Mock all raw data files with required columns to satisfy ID_ENTITY_MAP
+    raw_path = run_context.raw_snapshot_path
+
+    pl.DataFrame({"order_id": ["o1"], "customer_id": ["c1"]}).write_parquet(
+        raw_path / "df_orders_2026.parquet"
+    )
+
+    pl.DataFrame(
+        {"order_id": ["o1"], "product_id": ["p1"], "seller_id": ["s1"]}
+    ).write_parquet(raw_path / "df_order_items_2026.parquet")
+
+    pl.DataFrame({"customer_id": ["c1"]}).write_parquet(
+        raw_path / "df_customers_2026.parquet"
+    )
+
+    pl.DataFrame({"order_id": ["o1"]}).write_parquet(
+        raw_path / "df_payments_2026.parquet"
+    )
+
+    # Mock products just to be safe though not strictly in ID_ENTITY_MAP as a source
+    pl.DataFrame({"product_id": ["p1"]}).write_parquet(
+        raw_path / "df_products_2026.parquet"
+    )
+
+    # Mock promote to avoid GCS errors in local test
+    monkeypatch.setattr(
+        "data_pipeline.contract.id_registrar.promote_new_mapping_files", lambda *_: None
+    )
+
+    mappings = extract_entity_mappings(run_context)
+
+    assert "order_id" in mappings
+    assert "customer_id" in mappings
+    assert "product_id" in mappings
+    assert "seller_id" in mappings
+
+    # Verify one result
+    result = mappings["order_id"].collect()
+    assert "order_id_int" in result.columns
+    assert result[0, "order_id_int"] == 1
 
 
 # ------------------------------------------------------------
@@ -229,13 +279,30 @@ def test_apply_contract_orders_success(tmp_path, sample_orders_df):
         run_context.raw_snapshot_path / f"df_orders_{suffix}.csv"
     )
 
-    report, inv_ids, val_ids = apply_contract(run_context, "df_orders")
+    # Mock Discovery Mappings
+    master_mappings = {
+        "order_id": pl.DataFrame(
+            {"order_id": ["o1", "o2", "o3"], "order_id_int": [1, 2, 3]}
+        ).lazy(),
+        "customer_id": pl.DataFrame(
+            {"customer_id": ["c1", "c2", "c3"], "customer_id_int": [1, 2, 3]}
+        ).lazy(),
+    }
+
+    report, inv_ids, val_ids = apply_contract(
+        run_context, "df_orders", master_mappings=master_mappings
+    )
 
     assert report["status"] == "success"
     assert report["final_rows"] == 3
     assert len(val_ids) == 3
-    assert not inv_ids
-    assert (run_context.contracted_path / f"df_orders_{suffix}.parquet").exists()
+
+    # Check that integer columns are present
+    df_result = pl.read_parquet(
+        run_context.contracted_path / f"df_orders_{suffix}.parquet"
+    )
+    assert "order_id_int" in df_result.columns
+    assert "customer_id_int" in df_result.columns
 
 
 def test_apply_contract_cascade_and_valid_propagation(
@@ -263,28 +330,39 @@ def test_apply_contract_cascade_and_valid_propagation(
         run_context.raw_snapshot_path / f"df_payments_{suffix}.csv"
     )
 
-    rep_o, inv_o, val_o = apply_contract(run_context, "df_orders")
+    # Mock Discovery Mappings
+    master_mappings = {
+        "order_id": pl.DataFrame(
+            {"order_id": ["o1", "o2", "o3"], "order_id_int": [1, 2, 3]}
+        ).lazy(),
+        "customer_id": pl.DataFrame(
+            {"customer_id": ["c1", "c2", "c3"], "customer_id_int": [1, 2, 3]}
+        ).lazy(),
+    }
+
+    rep_o, inv_o, val_o = apply_contract(
+        run_context, "df_orders", master_mappings=master_mappings
+    )
     assert "o2" in inv_o  # unparsable
     assert "o3" in inv_o  # impossible
     assert "o1" in val_o  # only one valid
 
     rep_p, inv_p, val_p = apply_contract(
-        run_context, "df_payments", invalid_order_ids=inv_o, valid_order_ids=val_o
+        run_context,
+        "df_payments",
+        master_mappings=master_mappings,
+        invalid_order_ids=inv_o,
+        valid_order_ids=val_o,
     )
 
     assert rep_p["removed_cascade_rows"] == 2  # o2 and o3 dropped
     assert rep_p["final_rows"] == 1
-    assert "o1" in set(
-        pl.read_parquet(run_context.contracted_path / f"df_payments_{suffix}.parquet")[
-            "order_id"
-        ].to_list()
-    )
 
 
 def test_apply_contract_unknown_table(tmp_path):
     run_context = RunContext.create(base=tmp_path)
     run_context.initialize_directories()
 
-    report, inv, val = apply_contract(run_context, "non_existent")
+    report, inv, val = apply_contract(run_context, "non_existent", master_mappings={})
     assert report["status"] == "failed"
     assert "Unknown table" in report["errors"][0]

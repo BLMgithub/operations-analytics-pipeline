@@ -9,11 +9,13 @@ import json
 import os
 import shutil
 
+from concurrent.futures import ThreadPoolExecutor
 from google.cloud import bigquery
 from data_pipeline.shared.table_configs import TABLE_CONFIG
 from data_pipeline.shared.run_context import RunContext
 from data_pipeline.validation.validation_executor import apply_validation
 from data_pipeline.contract.contract_executor import apply_contract
+from data_pipeline.contract.id_registrar import extract_entity_mappings
 from data_pipeline.assembly.assembly_executor import assemble_events, force_gc
 from data_pipeline.semantic.semantic_executor import build_semantic_layer
 from data_pipeline.publish.publish_executor import execute_publish_lifecycle
@@ -22,7 +24,6 @@ from data_pipeline.shared.storage_adapter import (
     download_raw_snapshot,
     upload_run_artifacts,
     upload_contracted_directory,
-    # download_contracted_datasets,
 )
 
 import psutil
@@ -150,14 +151,17 @@ def refresh_bq_external_cache(run_context: RunContext) -> None:
 
         return
 
-    try:
-        for table_name in TABLE_CONFIG:
-            client = bigquery.Client(project=project_id, location=location)
-            table_path = f"{project_id}.{dataset_id}.{table_name}"
-            query = f"CALL BQ.REFRESH_EXTERNAL_METADATA_CACHE('{table_path}')"
+    client = bigquery.Client(project=project_id, location=location)
 
-            # Execute the query synchronously
-            client.query(query).result()
+    def refresh_table(table_name):
+        table_path = f"{project_id}.{dataset_id}.{table_name}"
+        query = f"CALL BQ.REFRESH_EXTERNAL_METADATA_CACHE('{table_path}')"
+        client.query(query).result()
+
+    try:
+        # Parallel execute cache refresh
+        with ThreadPoolExecutor(max_workers=len(TABLE_CONFIG)) as executor:
+            executor.map(refresh_table, TABLE_CONFIG)
 
     except Exception as e:
         print(f"Failed to refresh BigQuery cache for {dataset_id}: {e}")
@@ -182,6 +186,9 @@ def run_initial_validation_stage(run_context) -> None:
 def run_contract_application_stage(run_context) -> tuple[set, set]:
     report = []
 
+    # Extract all UUIDs from (order_id, product_id, etc.) on raw_snapshot directory
+    master_mappings = extract_entity_mappings(run_context)
+
     # Accumulates set of invalid order_ids and valid order_ids, and apply to child tables.
     invalid_ids = set()
     valid_ids = set()
@@ -189,15 +196,15 @@ def run_contract_application_stage(run_context) -> tuple[set, set]:
     # NOTE: TABLE_CONFIG order must list parent first before its children.
     for table_name in TABLE_CONFIG:
 
-        contract, new_inv, new_val = apply_contract(
-            run_context, table_name, invalid_ids, valid_ids
+        contract_rep, new_inv, new_val = apply_contract(
+            run_context, table_name, master_mappings, invalid_ids, valid_ids
         )
 
         invalid_ids |= new_inv
         if new_val:
             valid_ids = new_val
 
-        report.append(contract)
+        report.append(contract_rep)
 
     stage_logger(run_context, stage="contract_application", report=report)
     return invalid_ids, valid_ids

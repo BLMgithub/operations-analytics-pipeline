@@ -186,37 +186,38 @@ def upload_contracted_directory(run_context: RunContext) -> None:
             blob.upload_from_filename(file)
 
 
-def download_contracted_datasets(run_context: RunContext) -> None:
-    """
-    Populate the reconstructed local contracted/ with full historical delta set from Silver Cloud storage.
+# NOTE: Legacy architecture helper, retain for fallback.
+# def download_contracted_datasets(run_context: RunContext) -> None:
+#     """
+#     Populate the reconstructed local contracted/ with full historical delta set from Silver Cloud storage.
 
-    Contract:
-    - Downloads the full accumulated Silver state from 'storage_contracted_path'.
-    """
+#     Contract:
+#     - Downloads the full accumulated Silver state from 'storage_contracted_path'.
+#     """
 
-    source = run_context.storage_contracted_path
-    destination = run_context.contracted_path
+#     source = run_context.storage_contracted_path
+#     destination = run_context.contracted_path
 
-    # Local filesystem case
-    if not str(source).startswith("gs://"):
-        shutil.copytree(source, destination, dirs_exist_ok=True)
-        return
+#     # Local filesystem case
+#     if not str(source).startswith("gs://"):
+#         shutil.copytree(source, destination, dirs_exist_ok=True)
+#         return
 
-    # GCS case
-    client = storage.Client()
+#     # GCS case
+#     client = storage.Client()
 
-    bucket_name, prefix = _split_gcs_path(source)
+#     bucket_name, prefix = _split_gcs_path(source)
 
-    bucket = client.bucket(bucket_name)
+#     bucket = client.bucket(bucket_name)
 
-    for blob in bucket.list_blobs(prefix=prefix):
-        if blob.name.endswith("/"):
-            continue
+#     for blob in bucket.list_blobs(prefix=prefix):
+#         if blob.name.endswith("/"):
+#             continue
 
-        target = destination / Path(blob.name).name
-        target.parent.mkdir(parents=True, exist_ok=True)
+#         target = destination / Path(blob.name).name
+#         target.parent.mkdir(parents=True, exist_ok=True)
 
-        blob.download_to_filename(target)
+#         blob.download_to_filename(target)
 
 
 def promote_new_mapping_files(runtime_dir: Path, destination: Path | str) -> None:

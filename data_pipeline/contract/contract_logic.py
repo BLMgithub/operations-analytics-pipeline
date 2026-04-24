@@ -6,7 +6,6 @@ import polars as pl
 from typing import List
 from data_pipeline.shared.table_configs import REQUIRED_TIMESTAMPS, TIMESTAMP_FORMATS
 
-
 # ------------------------------------------------------------
 # CONTRACT LOGICS
 # ------------------------------------------------------------
@@ -68,6 +67,7 @@ def remove_unparsable_timestamps(df: pl.DataFrame) -> tuple[pl.DataFrame, int, s
     exprs = []
     for col in REQUIRED_TIMESTAMPS:
         if col in df.columns:
+
             if df.schema[col] == pl.String:
                 fmt = TIMESTAMP_FORMATS.get(col)
                 exprs.append(
@@ -255,6 +255,7 @@ def enforce_schema(
         target_dtype = dtypes.get(col)
 
         if target_dtype == pl.Datetime:
+
             if df.schema[col] == pl.String:
                 fmt = TIMESTAMP_FORMATS.get(col)
                 exprs.append(pl.col(col).str.to_datetime(format=fmt, strict=False))
